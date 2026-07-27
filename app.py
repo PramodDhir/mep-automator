@@ -8,7 +8,7 @@ import streamlit as st
 
 # --- PAGE SETUP ---
 st.set_page_config(
-    page_title="Advanced HVAC P&ID, Hydraulics & Plant Suite", layout="wide"
+    page_title="Enterprise HVAC P&ID & Plant Automation Suite", layout="wide"
 )
 st.title("❄️ Enterprise HVAC P&ID, Plant Hydraulics & CSI-Format BOQ Automator")
 st.markdown(
@@ -38,10 +38,10 @@ with st.sidebar:
       "Floor-to-Floor Height (ft)", value=12.0, step=1.0
   )
   plant_to_riser_ft = st.number_input(
-      "Plant Room to Riser Base Distance (ft)", value=120.0, step=10.0
+      "Plant Room to Riser Base Distance (ft)", value=100.0, step=10.0
   )
   avg_branch_ft = st.number_input(
-      "Avg Riser-to-Equipment Branch Length (ft)", value=45.0, step=5.0
+      "Avg Riser-to-Equipment Branch Length (ft)", value=40.0, step=5.0
   )
 
   st.header("4. Hydraulic & Insulation Criteria")
@@ -91,63 +91,63 @@ def calc_pipe_size(gpm):
   return standard_sizes[-1]
 
 
-# --- DXF GRAPHICAL SYMBOL HELPERS ---
+# --- DXF GRAPHICAL SYMBOL HELPERS (SCHEMATIC SCALE) ---
 def draw_valve(msp, x, y, tag="BFV", layer="VALVES"):
   msp.add_lwpolyline(
       [
-          (x - 2, y + 1.2),
-          (x + 2, y - 1.2),
-          (x + 2, y + 1.2),
-          (x - 2, y - 1.2),
-          (x - 2, y + 1.2),
+          (x - 1.2, y + 0.8),
+          (x + 1.2, y - 0.8),
+          (x + 1.2, y + 0.8),
+          (x - 1.2, y - 0.8),
+          (x - 1.2, y + 0.8),
       ],
       dxfattribs={"layer": layer},
   )
   msp.add_text(
-      tag, dxfattribs={"height": 1.2, "layer": "ANNOTATIONS"}
-  ).set_placement((x - 2.5, y + 1.5))
+      tag, dxfattribs={"height": 0.8, "layer": "ANNOTATIONS"}
+  ).set_placement((x - 1.5, y + 1.0))
 
 
 def draw_control_valve(msp, x, y, tag="MCV", layer="VALVES"):
   msp.add_lwpolyline(
       [
-          (x - 2, y + 1.2),
-          (x + 2, y - 1.2),
-          (x + 2, y + 1.2),
-          (x - 2, y - 1.2),
-          (x - 2, y + 1.2),
+          (x - 1.2, y + 0.8),
+          (x + 1.2, y - 0.8),
+          (x + 1.2, y + 0.8),
+          (x - 1.2, y - 0.8),
+          (x - 1.2, y + 0.8),
       ],
       dxfattribs={"layer": layer},
   )
-  msp.add_line((x, y + 1.2), (x, y + 3.5), dxfattribs={"layer": layer})
+  msp.add_line((x, y + 0.8), (x, y + 2.2), dxfattribs={"layer": layer})
   msp.add_lwpolyline(
       [
-          (x - 1.5, y + 3.5),
-          (x + 1.5, y + 3.5),
-          (x + 1.5, y + 5),
-          (x - 1.5, y + 5),
-          (x - 1.5, y + 3.5),
+          (x - 1.0, y + 2.2),
+          (x + 1.0, y + 2.2),
+          (x + 1.0, y + 3.2),
+          (x - 1.0, y + 3.2),
+          (x - 1.0, y + 2.2),
       ],
       dxfattribs={"layer": layer},
   )
   msp.add_text(
-      tag, dxfattribs={"height": 1.2, "layer": "ANNOTATIONS"}
-  ).set_placement((x - 2.5, y + 5.2))
+      tag, dxfattribs={"height": 0.8, "layer": "ANNOTATIONS"}
+  ).set_placement((x - 1.5, y + 3.4))
 
 
 def draw_strainer(msp, x, y, layer="VALVES"):
-  msp.add_circle((x, y), radius=1.5, dxfattribs={"layer": layer})
-  msp.add_line((x - 1.5, y + 1.5), (x + 1.5, y - 1.5), dxfattribs={"layer": layer})
+  msp.add_circle((x, y), radius=1.0, dxfattribs={"layer": layer})
+  msp.add_line((x - 1.0, y + 1.0), (x + 1.0, y - 1.0), dxfattribs={"layer": layer})
   msp.add_text(
-      "STR", dxfattribs={"height": 1.1, "layer": "ANNOTATIONS"}
-  ).set_placement((x - 2, y + 2))
+      "STR", dxfattribs={"height": 0.8, "layer": "ANNOTATIONS"}
+  ).set_placement((x - 1.2, y + 1.3))
 
 
 def draw_instrument(msp, x, y, label="PI/TI", layer="INSTRUMENTATION"):
-  msp.add_circle((x, y), radius=1.8, dxfattribs={"layer": layer})
+  msp.add_circle((x, y), radius=1.2, dxfattribs={"layer": layer})
   msp.add_text(
-      label, dxfattribs={"height": 1.1, "layer": "ANNOTATIONS"}
-  ).set_placement((x - 2, y + 2.2))
+      label, dxfattribs={"height": 0.8, "layer": "ANNOTATIONS"}
+  ).set_placement((x - 1.5, y + 1.5))
 
 
 # --- FILE UPLOAD WORKFLOW ---
@@ -211,58 +211,42 @@ if uploaded_file:
         unique_risers = df["Riser_ID"].unique()
         num_risers = len(unique_risers)
 
-        # 1. Physical Pipe Length Totals (Feet)
-        header_length_ft = plant_to_riser_ft + (num_risers * 180)
+        header_length_ft = plant_to_riser_ft + (num_risers * 120)
         total_riser_length_ft = (
             max_floor_num * floor_height_ft * num_risers * 2
-        )  # Supply + Return
-        total_branch_length_ft = (
-            len(df) * avg_branch_ft * 2
-        )  # Supply + Return drops
-
+        )
+        total_branch_length_ft = len(df) * avg_branch_ft * 2
         grand_total_chw_pipe_ft = (
             header_length_ft + total_riser_length_ft + total_branch_length_ft
         )
 
-        # 2. Equivalent Length Friction Loss (Including 50% fitting allowance)
         effective_friction_length_ft = grand_total_chw_pipe_ft * 1.5
         chw_friction_head_ft = (
             effective_friction_length_ft / 100.0
         ) * design_friction_rate
 
-        # 3. Component Pressure Drops (Feet of Head)
-        chiller_evap_drop_ft = 12.0
-        ahu_coil_drop_ft = 12.0
-        control_valves_drop_ft = 10.0
-        balancing_valves_drop_ft = 5.0
-        strainer_drop_ft = 5.0
-
         total_chw_pump_tdh_ft = (
             chw_friction_head_ft
-            + chiller_evap_drop_ft
-            + ahu_coil_drop_ft
-            + control_valves_drop_ft
-            + balancing_valves_drop_ft
-            + strainer_drop_ft
+            + 12.0  # Chiller evaporator drop
+            + 12.0  # AHU coil drop
+            + 10.0  # Control valves
+            + 5.0  # Balancing valves
+            + 5.0  # Strainer
         )
 
-        # Condenser Water Hydraulics
-        ct_lift_ft = (
-            max_floor_num * floor_height_ft * 0.45 + 30.0
-        )  # Estimated tower height above plant room
-        cw_pipe_length_ft = num_chillers * 250.0
+        ct_lift_ft = max_floor_num * floor_height_ft * 0.45 + 35.0
+        cw_pipe_length_ft = num_chillers * 180.0
         cw_friction_head_ft = (cw_pipe_length_ft * 1.5 / 100.0) * 3.0
         total_cw_pump_tdh_ft = (
             ct_lift_ft
             + cw_friction_head_ft
-            + chiller_evap_drop_ft
-            + 8.0  # condenser drop
-            + 10.0  # cooling tower nozzle head
+            + 12.0  # Chiller condenser drop
+            + 8.0  # Cooling tower nozzle head
         )
 
         # --- DXF CREATION ---
         doc = ezdxf.new(dxfversion="R2010")
-        doc.header["$LTSCALE"] = 500.0
+        doc.header["$LTSCALE"] = 100.0
         doc.header["$INSUNITS"] = units.MM
         msp = doc.modelspace()
 
@@ -276,24 +260,24 @@ if uploaded_file:
         doc.layers.add("PLANT_EQUIP", color=7)
         doc.layers.add("ANNOTATIONS", color=7)
 
-        # --- CREATE UNIFORM BLOCKS WITH ATTRIBUTES ---
+        # --- CREATE PROPORTIONAL SCHEMA BLOCKS ---
         ahu_blk = doc.blocks.new(name="EQ-AHU-STD")
         ahu_blk.add_lwpolyline(
-            [(0, 0), (600, 0), (600, 400), (0, 400), (0, 0)],
+            [(0, 0), (24, 0), (24, 16), (0, 16), (0, 0)],
             dxfattribs={"layer": "PLANT_EQUIP"},
         )
-        ahu_blk.add_circle((300, 200), radius=60, dxfattribs={"layer": "PLANT_EQUIP"})
+        ahu_blk.add_circle((12, 8), radius=3.5, dxfattribs={"layer": "PLANT_EQUIP"})
         ahu_blk.add_attdef(
             "EQUIP_TAG",
-            (300, 350),
+            (12, 12),
             "Tag:",
-            dxfattribs={"height": 25, "layer": "ANNOTATIONS"},
+            dxfattribs={"height": 1.2, "layer": "ANNOTATIONS"},
         )
         ahu_blk.add_attdef(
             "CAPACITY",
-            (300, 300),
+            (12, 4),
             "Capacity:",
-            dxfattribs={"height": 18, "layer": "ANNOTATIONS"},
+            dxfattribs={"height": 0.9, "layer": "ANNOTATIONS"},
         )
 
         boq_dict = {}
@@ -302,38 +286,43 @@ if uploaded_file:
           key = (csi_code, desc, size_rating, unit)
           boq_dict[key] = boq_dict.get(key, 0.0) + qty
 
-        # --- CHILLER PLANT ROOM DRAWING SECTION ---
-        plant_origin_x = -300
-        plant_origin_y = -150
+        # --- CHILLER PLANT ROOM DRAWING SECTION (ALIGNED ON LEFT) ---
+        plant_origin_x = -140
+        plant_origin_y = 0
         chiller_capacity_tr = total_plant_tr / num_chillers
         chiller_gpm = chiller_capacity_tr * default_tr_to_gpm
         chiller_pipe = calc_pipe_size(chiller_gpm)
 
         msp.add_text(
             f"CHILLER PLANT ROOM | ARCHITECTURE: {chw_system_type.upper()}",
-            dxfattribs={"height": 4.0, "layer": "ANNOTATIONS"},
-        ).set_placement((plant_origin_x, plant_origin_y + 90))
-
+            dxfattribs={"height": 2.2, "layer": "ANNOTATIONS"},
+        ).set_placement((plant_origin_x, plant_origin_y + 45))
         msp.add_text(
             (
                 f"DESIGN PUMP HEADS -> Primary CHW TDH:"
                 f" {total_chw_pump_tdh_ft:.1f} ft | Condenser Water TDH:"
                 f" {total_cw_pump_tdh_ft:.1f} ft"
             ),
-            dxfattribs={"height": 2.5, "layer": "ANNOTATIONS"},
-        ).set_placement((plant_origin_x, plant_origin_y + 82))
+            dxfattribs={"height": 1.4, "layer": "ANNOTATIONS"},
+        ).set_placement((plant_origin_x, plant_origin_y + 41))
+
+        # Draw Chillers, Primary Pumps, Cooling Towers & Condenser Pumps
+        ct_gpm = chiller_gpm * 1.25
+        ct_pipe = calc_pipe_size(ct_gpm)
 
         for c in range(num_chillers):
-          cx = plant_origin_x + (c * 160)
-          cy = plant_origin_y + 40
+          cx = plant_origin_x + (c * 65)
+          cy = plant_origin_y + 15
+
+          # Chiller Box
           msp.add_lwpolyline(
-              [(cx, cy), (cx + 100, cy), (cx + 100, cy + 50), (cx, cy + 50), (cx, cy)],
+              [(cx, cy), (cx + 40, cy), (cx + 40, cy + 20), (cx, cy + 20), (cx, cy)],
               dxfattribs={"layer": "PLANT_EQUIP"},
           )
           msp.add_text(
-              f"CH-{c+1}\n({chiller_capacity_tr} TR)",
-              dxfattribs={"height": 2.0, "layer": "ANNOTATIONS"},
-          ).set_placement((cx + 15, cy + 20))
+              f"CH-{c+1}\n{chiller_capacity_tr}TR",
+              dxfattribs={"height": 0.9, "layer": "ANNOTATIONS"},
+          ).set_placement((cx + 5, cy + 6))
           add_csi_item(
               "23 64 23",
               "Water-Chillers (Centrifugal / Screw Packaged Unit)",
@@ -342,15 +331,15 @@ if uploaded_file:
               "EA",
           )
 
-          # Primary Pump with calculated head
-          px = cx + 40
-          py = cy - 25
+          # Primary Chilled Water Pump
+          px = cx + 20
+          py = cy - 8
           msp.add_circle(
-              (px, py), radius=8, dxfattribs={"layer": "PLANT_EQUIP"}
+              (px, py), radius=3.5, dxfattribs={"layer": "PLANT_EQUIP"}
           )
           msp.add_text(
-              f"P-CH-{c+1}", dxfattribs={"height": 1.5, "layer": "ANNOTATIONS"}
-          ).set_placement((px - 6, py - 14))
+              f"P-CH-{c+1}", dxfattribs={"height": 0.8, "layer": "ANNOTATIONS"}
+          ).set_placement((px - 5, py - 5))
           add_csi_item(
               "23 21 23",
               "Hydronic Pumps (Primary End-Suction Centrifugal)",
@@ -359,37 +348,15 @@ if uploaded_file:
               "EA",
           )
 
-        if "Primary-Secondary" in chw_system_type:
-          for sp in range(2):
-            spx = plant_origin_x + 360 + (sp * 60)
-            spy = plant_origin_y + 40
-            msp.add_circle(
-                (spx, spy), radius=8, dxfattribs={"layer": "PLANT_EQUIP"}
-            )
-            msp.add_text(
-                f"P-SEC-{sp+1}", dxfattribs={"height": 1.5, "layer": "ANNOTATIONS"}
-            ).set_placement((spx - 8, spy - 14))
-            add_csi_item(
-                "23 21 23",
-                "Hydronic Pumps (Secondary Variable Speed Package)",
-                f'{chiller_pipe}" Size @ {(total_chw_pump_tdh_ft * 0.7):.1f} ft TDH',
-                1,
-                "EA",
-            )
-
-        # Cooling Towers & Condenser Circuit
-        ct_gpm = chiller_gpm * 1.25
-        ct_pipe = calc_pipe_size(ct_gpm)
-        for ct in range(num_chillers):
-          ctx = plant_origin_x + (ct * 160)
-          cty = plant_origin_y + 130
+          # Cooling Tower above
+          cty = plant_origin_y + 60
           msp.add_lwpolyline(
-              [(ctx, cty), (ctx + 80, cty), (ctx + 80, cty + 40), (ctx, cty + 40), (ctx, cty)],
+              [(cx, cty), (cx + 40, cty), (cx + 40, cty + 20), (cx, cty + 20), (cx, cty)],
               dxfattribs={"layer": "PLANT_EQUIP"},
           )
           msp.add_text(
-              f"CT-{ct+1}", dxfattribs={"height": 2.0, "layer": "ANNOTATIONS"}
-          ).set_placement((ctx + 20, cty + 15))
+              f"CT-{c+1}", dxfattribs={"height": 1.0, "layer": "ANNOTATIONS"},
+          ).set_placement((cx + 10, cty + 7))
           add_csi_item(
               "23 65 00",
               "Induced-Draft Crossflow Cooling Towers",
@@ -398,14 +365,14 @@ if uploaded_file:
               "EA",
           )
 
-          cwp_x = ctx + 40
-          cwp_y = cty - 20
+          # Condenser Water Pump
+          cwp_y = cty - 10
           msp.add_circle(
-              (cwp_x, cwp_y), radius=7, dxfattribs={"layer": "PLANT_EQUIP"}
+              (px, cwp_y), radius=3.5, dxfattribs={"layer": "PLANT_EQUIP"}
           )
           msp.add_text(
-              f"P-CW-{ct+1}", dxfattribs={"height": 1.5, "layer": "ANNOTATIONS"}
-          ).set_placement((cwp_x - 6, cwp_y - 12))
+              f"P-CW-{c+1}", dxfattribs={"height": 0.8, "layer": "ANNOTATIONS"}
+          ).set_placement((px - 5, cwp_y - 5))
           add_csi_item(
               "23 21 23",
               "Condenser Water Centrifugal Pumps",
@@ -414,28 +381,45 @@ if uploaded_file:
               "EA",
           )
 
+          # Connect CW and CHW plant lines
           msp.add_line(
-              (ctx + 40, cty),
-              (ctx + 40, cty + 40),
-              dxfattribs={"layer": "CDWS_PIPE"},
+              (px, cy + 20), (px, cty), dxfattribs={"layer": "CDWS_PIPE"}
           )
           add_csi_item(
               "23 21 13",
               "Condenser Water Piping (Carbon Steel ASTM A53 Gr. B)",
               f'{ct_pipe}" Dia',
-              150,
+              120,
               "ft",
           )
 
-        # --- MAIN CHILLED WATER RISERS & DISTRIBUTION ---
+        if "Primary-Secondary" in chw_system_type:
+          for sp in range(2):
+            spx = plant_origin_x + 140 + (sp * 25)
+            spy = plant_origin_y + 15
+            msp.add_circle(
+                (spx, spy), radius=3.5, dxfattribs={"layer": "PLANT_EQUIP"}
+            )
+            msp.add_text(
+                f"P-SEC-{sp+1}",
+                dxfattribs={"height": 0.8, "layer": "ANNOTATIONS"},
+            ).set_placement((spx - 6, spy - 5))
+            add_csi_item(
+                "23 21 23",
+                "Hydronic Pumps (Secondary Variable Speed Package)",
+                f'{chiller_pipe}" Size @ {(total_chw_pump_tdh_ft * 0.7):.1f} ft TDH',
+                1,
+                "EA",
+            )
+
+        # --- MAIN CHILLED WATER HEADERS & RISERS ---
         header_gpm = total_chw_gpm
-        header_tr = df["TR"].sum()
         header_pipe = calc_pipe_size(header_gpm)
 
-        riser_spacing = 180
-        floor_height = 55
-        header_offset = 30
-        header_length = (num_risers * riser_spacing) + 80
+        riser_spacing = 90
+        floor_height = 25
+        header_offset = 15
+        header_length = (num_risers * riser_spacing) + 50
 
         msp.add_line(
             (0, 0), (header_length, 0), dxfattribs={"layer": "CHWS_PIPE"}
@@ -461,8 +445,8 @@ if uploaded_file:
             "ft",
         )
 
-        draw_valve(msp, 40, 0, "BFV-MAIN", "VALVES")
-        draw_valve(msp, 40, -header_offset, "BFV-MAIN", "VALVES")
+        draw_valve(msp, 20, 0, "BFV", "VALVES")
+        draw_valve(msp, 20, -header_offset, "BFV", "VALVES")
         add_csi_item(
             "23 05 23",
             "Butterfly Valve (Isolation - Main Header)",
@@ -479,9 +463,9 @@ if uploaded_file:
           riser_pipe = calc_pipe_size(riser_gpm)
 
           r_chws_x = (i + 1) * riser_spacing
-          r_chwr_x = r_chws_x + 20
+          r_chwr_x = r_chws_x + 10
           max_floor = riser_data["Floor"].max()
-          riser_top_y = (max_floor * floor_height) + 25
+          riser_top_y = (max_floor * floor_height) + 15
 
           msp.add_line(
               (r_chws_x, 0),
@@ -512,11 +496,9 @@ if uploaded_file:
               "ft",
           )
 
-          draw_valve(msp, r_chws_x, 10, f"BFV-R{riser_id}", "VALVES")
-          draw_valve(msp, r_chwr_x, 10, f"BFV-R{riser_id}", "VALVES")
-          draw_instrument(
-              msp, r_chws_x, riser_top_y - 10, "DPT", "INSTRUMENTATION"
-          )
+          draw_valve(msp, r_chws_x, 5, f"BFV", "VALVES")
+          draw_valve(msp, r_chwr_x, 5, f"BFV", "VALVES")
+          draw_instrument(msp, r_chws_x, riser_top_y - 5, "DPT", "INSTRUMENTATION")
           add_csi_item(
               "23 05 19",
               (
@@ -534,7 +516,7 @@ if uploaded_file:
             ahu_gpm = row["Design_GPM"]
             ahu_tr = row["TR"]
             ahu_pipe = calc_pipe_size(ahu_gpm)
-            branch_end_x = r_chwr_x + 65
+            branch_end_x = r_chwr_x + 35
 
             msp.add_line(
                 (r_chws_x, floor_y),
@@ -542,17 +524,17 @@ if uploaded_file:
                 dxfattribs={"layer": "CHWS_PIPE"},
             )
             msp.add_line(
-                (r_chwr_x, floor_y - 12),
-                (branch_end_x, floor_y - 12),
+                (r_chwr_x, floor_y - 6),
+                (branch_end_x, floor_y - 6),
                 dxfattribs={"layer": "CHWR_PIPE"},
             )
 
-            # Insert Attributed Block for AHU
+            # Insert Proportionate AHU Block
             ahu_ref = msp.add_blockref(
-                "EQ-AHU-STD", insert=(branch_end_x + 5, floor_y - 20)
+                "EQ-AHU-STD", insert=(branch_end_x + 2, floor_y - 8)
             )
             ahu_ref.add_attrib("EQUIP_TAG", str(ahu_tag))
-            ahu_ref.add_attrib("CAPACITY", f"{ahu_tr:.1f} TR")
+            ahu_ref.add_attrib("CAPACITY", f"{ahu_tr:.1f}TR")
 
             add_csi_item(
                 "23 73 13",
@@ -577,17 +559,16 @@ if uploaded_file:
             )
 
             # Valves and Instrumentation on Branch
-            draw_valve(msp, r_chws_x + 15, floor_y, "BFV", "VALVES")
-            draw_strainer(msp, r_chws_x + 28, floor_y, "VALVES")
-            draw_control_valve(msp, r_chws_x + 42, floor_y, "MCV", "VALVES")
+            draw_valve(msp, r_chws_x + 8, floor_y, "BFV", "VALVES")
+            draw_strainer(msp, r_chws_x + 15, floor_y, "VALVES")
+            draw_control_valve(msp, r_chws_x + 22, floor_y, "MCV", "VALVES")
             draw_instrument(
-                msp, r_chws_x + 55, floor_y + 4, "PI/TI", "INSTRUMENTATION"
+                msp, r_chws_x + 28, floor_y + 2, "PI/TI", "INSTRUMENTATION"
             )
 
-            draw_valve(msp, r_chwr_x + 15, floor_y - 12, "BFV", "VALVES")
-            draw_valve(msp, r_chwr_x + 35, floor_y - 12, "BV", "VALVES")
+            draw_valve(msp, r_chwr_x + 8, floor_y - 6, "BFV", "VALVES")
             draw_instrument(
-                msp, r_chwr_x + 50, floor_y - 8, "PI/TI", "INSTRUMENTATION"
+                msp, r_chwr_x + 20, floor_y - 4, "PI/TI", "INSTRUMENTATION"
             )
 
             add_csi_item(
