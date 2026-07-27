@@ -32,7 +32,30 @@ if uploaded_file:
     try:
         df = pd.read_excel(uploaded_file)
         df.columns = df.columns.str.strip()
-        st.success("Data successfully loaded!")
+        
+        # --- SMART COLUMN MAPPING (Prevents KeyErrors) ---
+        rename_map = {}
+        for col in df.columns:
+            c_lower = col.lower()
+            if 'riser' in c_lower:
+                rename_map[col] = 'Riser_ID'
+            elif 'floor' in c_lower:
+                rename_map[col] = 'Floor'
+            elif 'tag' in c_lower or 'ahu' in c_lower:
+                rename_map[col] = 'AHU_Tag'
+            elif c_lower in ['tr', 'ton', 'tons', 'rt', 'cooling_tr']:
+                rename_map[col] = 'TR'
+        
+        df = df.rename(columns=rename_map)
+        
+        # Verify required columns exist
+        required_cols = ['Riser_ID', 'Floor', 'AHU_Tag', 'TR']
+        missing_cols = [c for c in required_cols if c not in df.columns]
+        if missing_cols:
+            st.error(f"❌ Missing required columns: {missing_cols}. Your Excel columns were detected as: {list(df.columns)}")
+            st.stop()
+            
+        st.success("Data successfully loaded and mapped!")
         st.dataframe(df.head(), use_container_width=True)
     except Exception as e:
         st.error(f"Error reading file. Please ensure it is a valid Excel sheet. Error: {e}")
@@ -140,4 +163,4 @@ if uploaded_file:
             st.subheader("BOQ Preview")
             st.table(boq_df)
 else:
-    st.info("👆 Please upload your Excel Design Summary to begin. Ensure columns include: Riser_ID, Floor, AHU_Tag, TR.")
+    st.info("👆 Please upload your Excel Design Summary to begin.")
