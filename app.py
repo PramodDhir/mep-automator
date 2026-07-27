@@ -1,43 +1,30 @@
 import io
 import ezdxf
 from ezdxf import units
+import pandas as pd
 import streamlit as st
 
 st.set_page_config(
-    page_title="HVAC Schematic & DXF Generator", layout="wide"
+    page_title="HVAC P&ID & Schematic Generator", layout="wide"
 )
 
 st.title("HVAC P&ID & Schematic Generator")
 st.markdown(
-    "Configure your equipment parameters in the sidebar and generate a professional DXF schematic complete with standardized layers, `LTSCALE` configurations, and uniform AHU/FCU blocks with schedule-ready attributes."
+    "Upload your equipment schedule (Excel or CSV) to automatically generate a professional DXF schematic with standardized layers, `LTSCALE` configurations, and uniform AHU/FCU blocks with schedule-ready attributes."
 )
 
-# Sidebar for Project & Equipment Inputs
-st.sidebar.header("Project & Drawing Parameters")
+# Sidebar - File Upload & Global Settings
+st.sidebar.header("1. Upload Equipment Schedule")
+uploaded_file = st.sidebar.file_uploader(
+    "Upload AHU/FCU Schedule (.xlsx, .xls, .csv)", type=["xlsx", "xls", "csv"]
+)
+
+st.sidebar.header("2. Drawing Parameters")
 project_name = st.sidebar.text_input("Project Name", "Commercial Complex HVAC")
 drawn_by = st.sidebar.text_input("Consultant / Designer", "MEP Consultant")
 
-st.sidebar.subheader("Air Handling Unit (AHU) Configuration")
-ahu_tag = st.sidebar.text_input("AHU Tag", "AHU-01")
-ahu_capacity = st.sidebar.text_input("AHU Cooling Capacity (TR)", "15.0 TR")
-ahu_airflow = st.sidebar.text_input("AHU Airflow (CFM)", "5000 CFM")
 
-st.sidebar.subheader("Fan Coil Unit (FCU) Configuration")
-fcu_tag = st.sidebar.text_input("FCU Tag", "FCU-01")
-fcu_capacity = st.sidebar.text_input("FCU Cooling Capacity (TR)", "2.5 TR")
-fcu_airflow = st.sidebar.text_input("FCU Airflow (CFM)", "800 CFM")
-
-
-def generate_dxf_bytes(
-    proj_name,
-    designer,
-    a_tag,
-    a_cap,
-    a_air,
-    f_tag,
-    f_cap,
-    f_air,
-):
+def generate_dxf_bytes(df_equipment):
   # Create DXF document targeting AutoCAD 2013/2014 format (AC1032)
   doc = ezdxf.new(dxfversion="AC1032", setup=True)
   doc.header["$LTSCALE"] = 500.0
@@ -131,23 +118,54 @@ def generate_dxf_bytes(
       dxfattribs={"height": 20, "style": "ROMANS", "layer": "0"},
   )
 
-  # 5. Insert Layout Entities & Chilled Water Piping into Modelspace
-  ahu_ref = msp.add_blockref("EQ-AHU-STD", insert=(1000, 1000))
-  ahu_ref.add_attrib("EQUIP_TAG", a_tag)
-  ahu_ref.add_attrib("CAPACITY", a_cap)
-  ahu_ref.add_attrib("AIRFLOW", a_air)
+  # 5. Process Equipment Schedule and Place Blocks Dynamically
+  start_x = 1000
+  spacing_x = 1800
+  y_pos = 1000
 
-  fcu_ref = msp.add_blockref("EQ-FCU-STD", insert=(2500, 1000))
-  fcu_ref.add_attrib("EQUIP_TAG", f_tag)
-  fcu_ref.add_attrib("CAPACITY", f_cap)
-  fcu_ref.add_attrib("AIRFLOW", f_air)
+  for index, row in df_equipment.iterrows():
+    eq_type = str(row.get("Type", "AHU")).upper()
+    eq_tag = str(row.get("Tag", f"EQ-{index+1}"))
+    eq_cap = str(row.get("Capacity", "10.0 TR"))
+    eq_air = str(row.get("Airflow", "2000 CFM"))
 
+    current_x = start_x + (index * spacing_x)
+
+    if "FCU" in eq_type:
+      ref = msp.add_blockref("EQ-FCU-STD", insert=(current_x, y_pos))
+    else:
+      ref = msp.add_blockref("EQ-AHU-STD", insert=(current_x, y_pos))
+
+    ref.add_attrib("EQUIP_TAG", eq_tag)
+    ref.add_attrib("CAPACITY", eq_cap)
+    ref.add_attrib("AIRFLOW", eq_air)
+
+    # Draw localized connection line stub to main headers
+    msp.add_line(
+        (current_x + 250, y_pos + 500),
+        (current_x + 250, y_pos + 1500),
+        dxfattribs={"layer": "M-Ac-Chw-Supply"},
+    )
+    msp.add_line(
+        (current_x + 250, y_pos),
+        (current_x + 250, y_pos - 200),
+        dxfattribs={"layer": "M-Ac-Chw-Return"},
+    )
+
+  # Draw Chilled Water Main Piping Headers spanning across all units
+  total_width = max(3500, start_x + (len(df_equipment) * spacing_x))
   msp.add_line(
-      (500, 1500), (3500, 1500), dxfattribs={"layer": "M-Ac-Chw-Supply"}
+      (500, y_pos + 1500),
+      (total_width, y_pos + 1500),
+      dxfattribs={"layer": "M-Ac-Chw-Supply"},
   )
-  msp.add_line((500, 800), (3500, 800), dxfattribs={"layer": "M-Ac-Chw-Return"})
+  msp.add_line(
+      (500, y_pos - 200),
+      (total_width, y_pos - 200),
+      dxfattribs={"layer": "M-Ac-Chw-Return"},
+  )
 
-  # Write to an in-memory string buffer, then encode to bytes for download
+  # Write to string buffer and convert to bytes
   string_stream = io.StringIO()
   doc.write(string_stream)
   stream = io.BytesIO(string_stream.getvalue().encode("utf-8"))
@@ -155,25 +173,35 @@ def generate_dxf_bytes(
   return stream
 
 
-# Streamlit UI Action Button
-if st.button("Generate & Download Professional DXF Schematic"):
-  dxf_stream = generate_dxf_bytes(
-      project_name,
-      drawn_by,
-      ahu_tag,
-      ahu_capacity,
-      ahu_airflow,
-      fcu_tag,
-      fcu_capacity,
-      fcu_airflow,
-  )
+# Main App UI Workflow
+if uploaded_file is not None:
+  try:
+    if uploaded_file.name.endswith(".csv"):
+      df = pd.read_csv(uploaded_file)
+    else:
+      df = pd.read_excel(uploaded_file)
 
-  st.success(
-      "DXF file compiled successfully with uniform equipment blocks and layers!"
-  )
-  st.download_button(
-      label="Download Chilled_Water_Schematic.dxf",
-      data=dxf_stream,
-      file_name="Chilled_Water_Schematic.dxf",
-      mime="application/dxf",
+    st.subheader("Uploaded Equipment Schedule Preview")
+    st.dataframe(df, use_container_width=True)
+
+    if st.button("Generate & Download Professional DXF Schematic"):
+      dxf_stream = generate_dxf_bytes(df)
+      st.success(
+          "DXF schematic generated successfully from your equipment schedule!"
+      )
+      st.download_button(
+          label="Download Chilled_Water_Schematic.dxf",
+          data=dxf_stream,
+          file_name="Chilled_Water_Schematic.dxf",
+          mime="application/dxf",
+      )
+
+  except Exception as e:
+    st.error(
+        f"Error reading the uploaded file. Please ensure columns match ('Type', 'Tag', 'Capacity', 'Airflow'). Details: {e}"
+    )
+else:
+  st.info(
+      "👈 Please upload your Excel or CSV equipment schedule in the sidebar to"
+      " get started."
   )
