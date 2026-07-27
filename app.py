@@ -5,9 +5,9 @@ import math
 import io
 
 # --- PAGE SETUP ---
-st.set_page_config(page_title="Professional HVAC P&ID & Schematic Automator", layout="wide")
-st.title("❄️ Advanced HVAC P&ID Schematic & Size-Disaggregated BOQ Automator")
-st.markdown("Generate consultant-grade HVAC P&ID schematics and detailed size-wise BOQ from your design summary.")
+st.set_page_config(page_title="Professional HVAC P&ID & CSI BOQ Automator", layout="wide")
+st.title("❄️ Advanced HVAC P&ID Schematic & CSI-Format BOQ Automator")
+st.markdown("Generate consultant-grade HVAC schematics and CSI MasterFormat Division 23 size-disaggregated BOQ from your design summary.")
 
 # --- SIZING CRITERIA ---
 with st.expander("Hydraulic Design & Sizing Criteria", expanded=False):
@@ -90,8 +90,8 @@ if uploaded_file:
         st.error(f"Error reading file. Please ensure it is a valid Excel sheet. Error: {e}")
         st.stop()
 
-    if st.button("Generate Professional P&ID Schematic & BOQ", type="primary"):
-        with st.spinner("Executing hydraulic calculations, sizing components, and drafting P&ID graphics..."):
+    if st.button("Generate Professional P&ID & CSI BOQ", type="primary"):
+        with st.spinner("Executing hydraulic calculations, sizing, and building CSI Division 23 BOQ..."):
             
             header_gpm = df['Design_GPM'].sum()
             header_tr = df['TR'].sum()
@@ -129,17 +129,17 @@ if uploaded_file:
             msp.add_text(f"MAIN CHWS HEADER: {header_tr:.1f} TR | {header_gpm:.1f} GPM | SIZE: {header_pipe}\" DIA", dxfattribs={'height': 3.5, 'layer': 'ANNOTATIONS'}).set_placement((10, 5))
             msp.add_text(f"MAIN CHWR HEADER: {header_tr:.1f} TR | {header_gpm:.1f} GPM | SIZE: {header_pipe}\" DIA", dxfattribs={'height': 3.5, 'layer': 'ANNOTATIONS'}).set_placement((10, -header_offset - 6))
 
-            # --- SIZE-WISE BOQ DICTIONARY TRACKING ---
-            # Format: {(Item Description, Size_Inches, Unit): Quantity}
+            # --- CSI-FORMAT BOQ DICTIONARY TRACKING ---
+            # Format: {(CSI_Code, Description, Size_Rating, Unit): Quantity}
             boq_dict = {}
 
-            def add_boq_item(desc, size, qty, unit="EA"):
-                key = (desc, size, unit)
+            def add_csi_item(csi_code, desc, size_rating, qty, unit="EA"):
+                key = (csi_code, desc, size_rating, unit)
                 boq_dict[key] = boq_dict.get(key, 0.0) + qty
 
             # Add Main Header Piping & Valves
-            add_boq_item("Chilled Water Header Pipe (Supply & Return)", header_pipe, header_length * 2, "ft")
-            add_boq_item("Butterfly Valve (Isolation - Main Header)", header_pipe, 2, "EA")
+            add_csi_item("23 21 13", "Hydronic Piping - Chilled Water Main Header (Supply & Return)", f"{header_pipe}\" Dia", header_length * 2, "ft")
+            add_csi_item("23 05 23", "Butterfly Valve (Isolation - Main Header)", f"{header_pipe}\" Size", 2, "EA")
 
             for i, riser_id in enumerate(unique_risers):
                 riser_data = df[df['Riser_ID'] == riser_id].sort_values(by="Floor")
@@ -157,15 +157,15 @@ if uploaded_file:
                 msp.add_line((r_chws_x, 0), (r_chws_x, riser_top_y), dxfattribs={'layer': 'CHWS_PIPE'})
                 msp.add_line((r_chwr_x, -header_offset), (r_chwr_x, riser_top_y), dxfattribs={'layer': 'CHWR_PIPE'})
                 
-                add_boq_item("Chilled Water Riser Pipe (Supply & Return)", riser_pipe, riser_top_y * 2, "ft")
+                add_csi_item("23 21 13", f"Hydronic Piping - Chilled Water Riser {riser_id} (Supply & Return)", f"{riser_pipe}\" Dia", riser_top_y * 2, "ft")
                 
                 # Riser Isolation Butterfly Valves & DPT Graphics
                 draw_valve(msp, r_chws_x, 10, f"BFV-R{riser_id}", "VALVES")
                 draw_valve(msp, r_chwr_x, 10, f"BFV-R{riser_id}", "VALVES")
-                add_boq_item("Butterfly Valve (Isolation - Riser Base)", riser_pipe, 2, "EA")
+                add_csi_item("23 05 23", f"Butterfly Valve (Isolation - Riser {riser_id} Base)", f"{riser_pipe}\" Size", 2, "EA")
                 
                 draw_instrument(msp, r_chws_x, riser_top_y - 10, "DPT", "INSTRUMENTATION")
-                add_boq_item("Differential Pressure Transmitter (DPT Loop)", riser_pipe, 1, "EA")
+                add_csi_item("23 05 19", f"Differential Pressure Transmitter (DPT) - Riser {riser_id}", f"{riser_pipe}\" Loop", 1, "EA")
                 
                 msp.add_text(f"RISER {riser_id}: {riser_tr:.1f} TR | {riser_gpm:.1f} GPM | {riser_pipe}\" DIA", dxfattribs={'height': 2.5, 'layer': 'ANNOTATIONS'}).set_placement((r_chws_x - 10, riser_top_y + 4))
 
@@ -182,8 +182,11 @@ if uploaded_file:
                     msp.add_line((r_chws_x, floor_y), (branch_end_x, floor_y), dxfattribs={'layer': 'CHWS_PIPE'})
                     msp.add_line((r_chwr_x, floor_y - 12), (branch_end_x, floor_y - 12), dxfattribs={'layer': 'CHWR_PIPE'})
                     
-                    add_boq_item("Chilled Water Branch Pipe (Supply & Return)", ahu_pipe, 130, "ft")
+                    add_csi_item("23 21 13", f"Hydronic Piping - AHU Branch Line ({ahu_tag})", f"{ahu_pipe}\" Dia", 130, "ft")
                     
+                    # Add AHU Equipment to CSI BOQ (`23 73 13`)
+                    add_csi_item("23 73 13", f"Indoor Central-Station Air-Handling Unit ({ahu_tag})", f"{ahu_tr:.1f} TR / {ahu_gpm:.1f} GPM", 1, "EA")
+
                     # Graphical Valve & Instrumentation Stations on Branch
                     draw_valve(msp, r_chws_x + 15, floor_y, "BFV", "VALVES")
                     draw_strainer(msp, r_chws_x + 28, floor_y, "VALVES")
@@ -194,12 +197,12 @@ if uploaded_file:
                     draw_valve(msp, r_chwr_x + 35, floor_y - 12, "BV", "VALVES")
                     draw_instrument(msp, r_chwr_x + 50, floor_y - 8, "PI/TI", "INSTRUMENTATION")
 
-                    # BOQ Size-wise additions for AHU components
-                    add_boq_item("Butterfly Valve (Isolation - Equipment Drop)", ahu_pipe, 2, "EA")
-                    add_boq_item("Y-Strainer with SS Screen", ahu_pipe, 1, "EA")
-                    add_boq_item("Motorized 2-Way Control Valve", ahu_pipe, 1, "EA")
-                    add_boq_item("Manual Balancing Valve", ahu_pipe, 1, "EA")
-                    add_boq_item("Pressure & Temperature Gauge Assembly (PI/TI Set)", ahu_pipe, 2, "SET")
+                    # CSI BOQ Size-wise additions for AHU components
+                    add_csi_item("23 05 23", "Butterfly Valve (Isolation - Equipment Drop)", f"{ahu_pipe}\" Size", 2, "EA")
+                    add_csi_item("23 21 16", "Y-Strainer with SS Screen", f"{ahu_pipe}\" Size", 1, "EA")
+                    add_csi_item("23 09 23", "Motorized 2-Way Control Valve with Actuator", f"{ahu_pipe}\" Size", 1, "EA")
+                    add_csi_item("23 05 23", "Manual Hydronic Balancing Valve", f"{ahu_pipe}\" Size", 1, "EA")
+                    add_csi_item("23 05 19", "Pressure & Temperature Gauge Assembly (PI/TI Set)", f"{ahu_pipe}\" Size", 2, "SET")
 
                     # Equipment Tag & Notes
                     msp.add_text(f"EQ: {ahu_tag} | {ahu_tr:.1f} TR | {ahu_gpm:.1f} GPM", dxfattribs={'height': 2.2, 'layer': 'ANNOTATIONS'}).set_placement((branch_end_x + 3, floor_y + 2))
@@ -209,12 +212,13 @@ if uploaded_file:
             doc.write(stream)
             dxf_data = stream.getvalue()
 
-            # --- BUILD SIZE-DISAGGREGATED BOQ DATAFRAME ---
+            # --- BUILD CSI-FORMAT BOQ DATAFRAME ---
             boq_rows = []
-            for (desc, size, unit), qty in sorted(boq_dict.items(), key=lambda x: (x[0][0], x[0][1])):
+            for (csi_code, desc, size_rating, unit), qty in sorted(boq_dict.items(), key=lambda x: (x[0][0], x[0][1], x[0][2])):
                 boq_rows.append({
+                    "CSI Section": csi_code,
                     "Item Description": desc,
-                    "Size / Diameter": f"{size}\"",
+                    "Size / Rating": size_rating,
                     "Quantity": round(qty, 1) if unit == "ft" else int(qty),
                     "Unit": unit
                 })
@@ -223,15 +227,15 @@ if uploaded_file:
             
             excel_buffer = io.BytesIO()
             with pd.ExcelWriter(excel_buffer, engine='openpyxl') as writer:
-                boq_df.to_excel(writer, index=False, sheet_name='Size_Wise_HVAC_BOQ')
+                boq_df.to_excel(writer, index=False, sheet_name='CSI_Division_23_BOQ')
             excel_data = excel_buffer.getvalue()
 
-            st.success("🎉 Consultant P&ID Schematic & Size-Disaggregated BOQ Generated Successfully!")
+            st.success("🎉 Consultant P&ID Schematic & CSI MasterFormat Division 23 BOQ Generated Successfully!")
             col1, col2 = st.columns(2)
             col1.download_button("📥 Download Consultant P&ID DXF", data=dxf_data, file_name="Consultant_HVAC_PID_Schematic.dxf", mime="image/vnd.dxf")
-            col2.download_button("📥 Download Size-Wise Excel BOQ", data=excel_data, file_name="Size_Wise_HVAC_BOQ.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+            col2.download_button("📥 Download CSI-Format Excel BOQ", data=excel_data, file_name="CSI_Division_23_HVAC_BOQ.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
             
-            st.subheader("Size-Disaggregated Bill of Quantities (BOQ) Preview")
+            st.subheader("CSI MasterFormat Division 23 Bill of Quantities (BOQ) Preview")
             st.dataframe(boq_df, width='stretch')
 else:
-    st.info("👆 Please upload your Excel Design Summary (containing design flow rates or tonnage) to generate the consultant P&ID schematic and size-disaggregated BOQ.")
+    st.info("👆 Please upload your Excel Design Summary (containing design flow rates or tonnage) to generate the consultant P&ID schematic and CSI-format BOQ.")
