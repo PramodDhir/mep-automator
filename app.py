@@ -6,8 +6,8 @@ import io
 
 # --- PAGE SETUP ---
 st.set_page_config(page_title="Professional HVAC P&ID & Schematic Automator", layout="wide")
-st.title("❄️ Advanced HVAC P&ID Schematic & BOQ Automator")
-st.markdown("Generate consultant-grade HVAC P&ID schematics with fully drawn valves, instrumentation loops, and detailed BOQ from your design summary.")
+st.title("❄️ Advanced HVAC P&ID Schematic & Size-Disaggregated BOQ Automator")
+st.markdown("Generate consultant-grade HVAC P&ID schematics and detailed size-wise BOQ from your design summary.")
 
 # --- SIZING CRITERIA ---
 with st.expander("Hydraulic Design & Sizing Criteria", expanded=False):
@@ -27,25 +27,21 @@ def calc_pipe_size(gpm):
 
 # --- DXF GRAPHICAL SYMBOL HELPERS ---
 def draw_valve(msp, x, y, tag="BFV", layer="VALVES"):
-    # Draws a professional 2-triangle valve symbol
     msp.add_lwpolyline([(x-2, y+1.2), (x+2, y-1.2), (x+2, y+1.2), (x-2, y-1.2), (x-2, y+1.2)], dxfattribs={'layer': layer})
     msp.add_text(tag, dxfattribs={'height': 1.2, 'layer': 'ANNOTATIONS'}).set_placement((x-2.5, y+1.5))
 
 def draw_control_valve(msp, x, y, tag="MCV", layer="VALVES"):
-    # Draws control valve with actuator box on top
     msp.add_lwpolyline([(x-2, y+1.2), (x+2, y-1.2), (x+2, y+1.2), (x-2, y-1.2), (x-2, y+1.2)], dxfattribs={'layer': layer})
     msp.add_line((x, y+1.2), (x, y+3.5), dxfattribs={'layer': layer})
     msp.add_lwpolyline([(x-1.5, y+3.5), (x+1.5, y+3.5), (x+1.5, y+5), (x-1.5, y+5), (x-1.5, y+3.5)], dxfattribs={'layer': layer})
     msp.add_text(tag, dxfattribs={'height': 1.2, 'layer': 'ANNOTATIONS'}).set_placement((x-2.5, y+5.2))
 
 def draw_strainer(msp, x, y, layer="VALVES"):
-    # Draws Y-Strainer symbol
     msp.add_circle((x, y), radius=1.5, dxfattribs={'layer': layer})
     msp.add_line((x-1.5, y+1.5), (x+1.5, y-1.5), dxfattribs={'layer': layer})
     msp.add_text("STR", dxfattribs={'height': 1.1, 'layer': 'ANNOTATIONS'}).set_placement((x-2, y+2))
 
 def draw_instrument(msp, x, y, label="PI/TI", layer="INSTRUMENTATION"):
-    # Draws gauge/instrument circle
     msp.add_circle((x, y), radius=1.8, dxfattribs={'layer': layer})
     msp.add_text(label, dxfattribs={'height': 1.1, 'layer': 'ANNOTATIONS'}).set_placement((x-2, y+2.2))
 
@@ -95,7 +91,7 @@ if uploaded_file:
         st.stop()
 
     if st.button("Generate Professional P&ID Schematic & BOQ", type="primary"):
-        with st.spinner("Executing hydraulic calculations and drafting consultant-grade P&ID graphics..."):
+        with st.spinner("Executing hydraulic calculations, sizing components, and drafting P&ID graphics..."):
             
             header_gpm = df['Design_GPM'].sum()
             header_tr = df['TR'].sum()
@@ -107,7 +103,7 @@ if uploaded_file:
             doc = ezdxf.new(dxfversion='R2010')
             msp = doc.modelspace()
             
-            # Layers setup following consultant standards
+            # Layers setup
             doc.layers.add("CHWS_PIPE", color=5)       # Blue - Chilled Water Supply
             doc.layers.add("CHWR_PIPE", color=1)       # Red - Chilled Water Return
             doc.layers.add("VALVES", color=3)          # Green - Valves & Fittings
@@ -126,20 +122,24 @@ if uploaded_file:
             msp.add_line((0, 0), (header_length, 0), dxfattribs={'layer': 'CHWS_PIPE'})
             msp.add_line((0, -header_offset), (header_length, -header_offset), dxfattribs={'layer': 'CHWR_PIPE'})
             
-            # Main Header Isolation Valves
+            # Main Header Isolation Valves Graphics
             draw_valve(msp, 40, 0, "BFV-MAIN", "VALVES")
             draw_valve(msp, 40, -header_offset, "BFV-MAIN", "VALVES")
 
             msp.add_text(f"MAIN CHWS HEADER: {header_tr:.1f} TR | {header_gpm:.1f} GPM | SIZE: {header_pipe}\" DIA", dxfattribs={'height': 3.5, 'layer': 'ANNOTATIONS'}).set_placement((10, 5))
             msp.add_text(f"MAIN CHWR HEADER: {header_tr:.1f} TR | {header_gpm:.1f} GPM | SIZE: {header_pipe}\" DIA", dxfattribs={'height': 3.5, 'layer': 'ANNOTATIONS'}).set_placement((10, -header_offset - 6))
 
-            total_pipe_length = header_length * 2
-            total_bfv = 2
-            total_cv = 0
-            total_balancing = 0
-            total_ystrainer = 0
-            total_dpt = 0
-            total_pi_ti = 0
+            # --- SIZE-WISE BOQ DICTIONARY TRACKING ---
+            # Format: {(Item Description, Size_Inches, Unit): Quantity}
+            boq_dict = {}
+
+            def add_boq_item(desc, size, qty, unit="EA"):
+                key = (desc, size, unit)
+                boq_dict[key] = boq_dict.get(key, 0.0) + qty
+
+            # Add Main Header Piping & Valves
+            add_boq_item("Chilled Water Header Pipe (Supply & Return)", header_pipe, header_length * 2, "ft")
+            add_boq_item("Butterfly Valve (Isolation - Main Header)", header_pipe, 2, "EA")
 
             for i, riser_id in enumerate(unique_risers):
                 riser_data = df[df['Riser_ID'] == riser_id].sort_values(by="Floor")
@@ -156,15 +156,16 @@ if uploaded_file:
                 # Draw Riser Stacks
                 msp.add_line((r_chws_x, 0), (r_chws_x, riser_top_y), dxfattribs={'layer': 'CHWS_PIPE'})
                 msp.add_line((r_chwr_x, -header_offset), (r_chwr_x, riser_top_y), dxfattribs={'layer': 'CHWR_PIPE'})
-                total_pipe_length += (riser_top_y * 2)
+                
+                add_boq_item("Chilled Water Riser Pipe (Supply & Return)", riser_pipe, riser_top_y * 2, "ft")
                 
                 # Riser Isolation Butterfly Valves & DPT Graphics
                 draw_valve(msp, r_chws_x, 10, f"BFV-R{riser_id}", "VALVES")
                 draw_valve(msp, r_chwr_x, 10, f"BFV-R{riser_id}", "VALVES")
-                total_bfv += 2 
+                add_boq_item("Butterfly Valve (Isolation - Riser Base)", riser_pipe, 2, "EA")
                 
                 draw_instrument(msp, r_chws_x, riser_top_y - 10, "DPT", "INSTRUMENTATION")
-                total_dpt += 1 
+                add_boq_item("Differential Pressure Transmitter (DPT Loop)", riser_pipe, 1, "EA")
                 
                 msp.add_text(f"RISER {riser_id}: {riser_tr:.1f} TR | {riser_gpm:.1f} GPM | {riser_pipe}\" DIA", dxfattribs={'height': 2.5, 'layer': 'ANNOTATIONS'}).set_placement((r_chws_x - 10, riser_top_y + 4))
 
@@ -180,68 +181,57 @@ if uploaded_file:
                     # Branch lines to AHU
                     msp.add_line((r_chws_x, floor_y), (branch_end_x, floor_y), dxfattribs={'layer': 'CHWS_PIPE'})
                     msp.add_line((r_chwr_x, floor_y - 12), (branch_end_x, floor_y - 12), dxfattribs={'layer': 'CHWR_PIPE'})
-                    total_pipe_length += 130
+                    
+                    add_boq_item("Chilled Water Branch Pipe (Supply & Return)", ahu_pipe, 130, "ft")
                     
                     # Graphical Valve & Instrumentation Stations on Branch
-                    # Supply Line items: Isolation BFV, Y-Strainer, Control Valve, PI/TI Gauge
                     draw_valve(msp, r_chws_x + 15, floor_y, "BFV", "VALVES")
                     draw_strainer(msp, r_chws_x + 28, floor_y, "VALVES")
                     draw_control_valve(msp, r_chws_x + 42, floor_y, "MCV", "VALVES")
                     draw_instrument(msp, r_chws_x + 55, floor_y + 4, "PI/TI", "INSTRUMENTATION")
 
-                    # Return Line items: Isolation BFV, Balancing Valve, PI/TI Gauge
                     draw_valve(msp, r_chwr_x + 15, floor_y - 12, "BFV", "VALVES")
                     draw_valve(msp, r_chwr_x + 35, floor_y - 12, "BV", "VALVES")
                     draw_instrument(msp, r_chwr_x + 50, floor_y - 8, "PI/TI", "INSTRUMENTATION")
 
-                    # Equipment Tag and Sizing Notes
+                    # BOQ Size-wise additions for AHU components
+                    add_boq_item("Butterfly Valve (Isolation - Equipment Drop)", ahu_pipe, 2, "EA")
+                    add_boq_item("Y-Strainer with SS Screen", ahu_pipe, 1, "EA")
+                    add_boq_item("Motorized 2-Way Control Valve", ahu_pipe, 1, "EA")
+                    add_boq_item("Manual Balancing Valve", ahu_pipe, 1, "EA")
+                    add_boq_item("Pressure & Temperature Gauge Assembly (PI/TI Set)", ahu_pipe, 2, "SET")
+
+                    # Equipment Tag & Notes
                     msp.add_text(f"EQ: {ahu_tag} | {ahu_tr:.1f} TR | {ahu_gpm:.1f} GPM", dxfattribs={'height': 2.2, 'layer': 'ANNOTATIONS'}).set_placement((branch_end_x + 3, floor_y + 2))
                     msp.add_text(f"Line Size: {ahu_pipe}\" DIA", dxfattribs={'height': 1.6, 'layer': 'ANNOTATIONS'}).set_placement((branch_end_x + 3, floor_y - 4))
-                    
-                    total_bfv += 2     
-                    total_ystrainer += 1 
-                    total_cv += 1      
-                    total_balancing += 1 
-                    total_pi_ti += 2   
 
             stream = io.StringIO()
             doc.write(stream)
             dxf_data = stream.getvalue()
 
-            # --- BOQ DATAFRAME ---
-            boq_df = pd.DataFrame({
-                "Item Description": [
-                    "Chilled Water Piping (Total Mixed Header, Riser & Branch Sizes)",
-                    "Butterfly Valves (Isolation - Mains, Risers & Equipment Drops)",
-                    "Motorized 2-Way Control Valves (AHU Coil Loops)",
-                    "Manual Balancing Valves (AHU Return Lines)",
-                    "Y-Strainers with SS Screen (AHU Supply Lines)",
-                    "Differential Pressure Transmitters (Riser DPT Loops)",
-                    "Pressure & Temperature Gauge Assemblies (PI/TI Sets)"
-                ],
-                "Quantity": [
-                    round(total_pipe_length, 0),
-                    total_bfv,
-                    total_cv,
-                    total_balancing,
-                    total_ystrainer,
-                    total_dpt,
-                    total_pi_ti
-                ],
-                "Unit": ["ft", "EA", "EA", "EA", "EA", "EA", "SET"]
-            })
+            # --- BUILD SIZE-DISAGGREGATED BOQ DATAFRAME ---
+            boq_rows = []
+            for (desc, size, unit), qty in sorted(boq_dict.items(), key=lambda x: (x[0][0], x[0][1])):
+                boq_rows.append({
+                    "Item Description": desc,
+                    "Size / Diameter": f"{size}\"",
+                    "Quantity": round(qty, 1) if unit == "ft" else int(qty),
+                    "Unit": unit
+                })
+            
+            boq_df = pd.DataFrame(boq_rows)
             
             excel_buffer = io.BytesIO()
             with pd.ExcelWriter(excel_buffer, engine='openpyxl') as writer:
-                boq_df.to_excel(writer, index=False, sheet_name='HVAC_BOQ')
+                boq_df.to_excel(writer, index=False, sheet_name='Size_Wise_HVAC_BOQ')
             excel_data = excel_buffer.getvalue()
 
-            st.success("🎉 Consultant P&ID Schematic with Fully Drawn Symbols & BOQ Generated Successfully!")
+            st.success("🎉 Consultant P&ID Schematic & Size-Disaggregated BOQ Generated Successfully!")
             col1, col2 = st.columns(2)
             col1.download_button("📥 Download Consultant P&ID DXF", data=dxf_data, file_name="Consultant_HVAC_PID_Schematic.dxf", mime="image/vnd.dxf")
-            col2.download_button("📥 Download Updated Excel BOQ", data=excel_data, file_name="HVAC_Detailed_BOQ.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+            col2.download_button("📥 Download Size-Wise Excel BOQ", data=excel_data, file_name="Size_Wise_HVAC_BOQ.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
             
-            st.subheader("Comprehensive Bill of Quantities (BOQ) Preview")
+            st.subheader("Size-Disaggregated Bill of Quantities (BOQ) Preview")
             st.dataframe(boq_df, width='stretch')
 else:
-    st.info("👆 Please upload your Excel Design Summary (containing custom design flow rates or tonnage) to generate the consultant P&ID schematic and BOQ.")
+    st.info("👆 Please upload your Excel Design Summary (containing design flow rates or tonnage) to generate the consultant P&ID schematic and size-disaggregated BOQ.")
