@@ -1,207 +1,464 @@
 import io
+import math
 import ezdxf
-from ezdxf import units
 import pandas as pd
 import streamlit as st
 
 st.set_page_config(
-    page_title="HVAC P&ID & Schematic Generator", layout="wide"
+    page_title="Professional HVAC P&ID & CSI BOQ Automator", layout="wide"
 )
-
-st.title("HVAC P&ID & Schematic Generator")
+st.title("❄️ Advanced HVAC P&ID Schematic & CSI-Format BOQ Automator")
 st.markdown(
-    "Upload your equipment schedule (Excel or CSV) to automatically generate a professional DXF schematic with standardized layers, `LTSCALE` configurations, and uniform AHU/FCU blocks with schedule-ready attributes."
+    "Generate consultant-grade HVAC schematics and CSI MasterFormat Division"
+    " 23 size-disaggregated BOQ from your design summary."
 )
 
-# Sidebar - File Upload & Global Settings
-st.sidebar.header("1. Upload Equipment Schedule")
-uploaded_file = st.sidebar.file_uploader(
-    "Upload AHU/FCU Schedule (.xlsx, .xls, .csv)", type=["xlsx", "xls", "csv"]
+# --- SIZING CRITERIA ---
+with st.expander("Hydraulic Design & Sizing Criteria", expanded=False):
+  col1, col2, col3 = st.columns(3)
+  delta_t_f = col1.number_input("Design Delta T (°F)", value=12.0)
+  max_vel_fps = col2.number_input("Max Allowable Velocity (fps)", value=8.0)
+  default_tr_to_gpm = col3.number_input("GPM per TR Factor", value=2.0)
+
+standard_sizes = [
+    0.5,
+    0.75,
+    1.0,
+    1.25,
+    1.5,
+    2.0,
+    2.5,
+    3.0,
+    4.0,
+    5.0,
+    6.0,
+    8.0,
+    10.0,
+    12.0,
+    14.0,
+    16.0,
+    18.0,
+    20.0,
+    24.0,
+    30.0,
+    36.0,
+]
+
+
+def calc_pipe_size(gpm):
+  if gpm <= 0:
+    return 0.5
+  theoretical_dia = math.sqrt(gpm / (2.448 * max_vel_fps))
+  for size in standard_sizes:
+    if size >= theoretical_dia:
+      return size
+  return standard_sizes[-1]
+
+
+# --- DXF GRAPHICAL SYMBOL HELPERS ---
+def draw_valve(msp, x, y, tag="BFV", layer="VALVES"):
+  msp.add_lwpolyline(
+      [
+          (x - 2, y + 1.2),
+          (x + 2, y - 1.2),
+          (x + 2, y + 1.2),
+          (x - 2, y - 1.2),
+          (x - 2, y + 1.2),
+      ],
+      dxfattribs={"layer": layer},
+  )
+  msp.add_text(
+      tag, dxfattribs={"height": 1.2, "layer": "ANNOTATIONS"}
+  ).set_placement((x - 2.5, y + 1.5))
+
+
+def draw_control_valve(msp, x, y, tag="MCV", layer="VALVES"):
+  msp.add_lwpolyline(
+      [
+          (x - 2, y + 1.2),
+          (x + 2, y - 1.2),
+          (x + 2, y + 1.2),
+          (x - 2, y - 1.2),
+          (x - 2, y + 1.2),
+      ],
+      dxfattribs={"layer": layer},
+  )
+  msp.add_line((x, y + 1.2), (x, y + 3.5), dxfattribs={"layer": layer})
+  msp.add_lwpolyline(
+      [
+          (x - 1.5, y + 3.5),
+          (x + 1.5, y + 3.5),
+          (x + 1.5, y + 5),
+          (x - 1.5, y + 5),
+          (x - 1.5, y + 3.5),
+      ],
+      dxfattribs={"layer": layer},
+  )
+  msp.add_text(
+      tag, dxfattribs={"height": 1.2, "layer": "ANNOTATIONS"}
+  ).set_placement((x - 2.5, y + 5.2))
+
+
+def draw_strainer(msp, x, y, layer="VALVES"):
+  msp.add_circle((x, y), radius=1.5, dxfattribs={"layer": layer})
+  msp.add_line((x - 1.5, y + 1.5), (x + 1.5, y - 1.5), dxfattribs={"layer": layer})
+  msp.add_text(
+      "STR", dxfattribs={"height": 1.1, "layer": "ANNOTATIONS"}
+  ).set_placement((x - 2, y + 2))
+
+
+def draw_instrument(msp, x, y, label="PI/TI", layer="INSTRUMENTATION"):
+  msp.add_circle((x, y), radius=1.8, dxfattribs={"layer": layer})
+  msp.add_text(
+      label, dxfattribs={"height": 1.1, "layer": "ANNOTATIONS"}
+  ).set_placement((x - 2, y + 2.2))
+
+
+# --- FILE UPLOAD WORKFLOW ---
+uploaded_file = st.file_uploader(
+    "Upload Design Summary Excel Sheet (.xlsx)", type=["xlsx"]
 )
 
-st.sidebar.header("2. Drawing Parameters")
-project_name = st.sidebar.text_input("Project Name", "Commercial Complex HVAC")
-drawn_by = st.sidebar.text_input("Consultant / Designer", "MEP Consultant")
-
-
-def generate_dxf_bytes(df_equipment):
-  # Create DXF document targeting AutoCAD 2013/2014 format (AC1032)
-  doc = ezdxf.new(dxfversion="AC1032", setup=True)
-  doc.header["$LTSCALE"] = 500.0
-  doc.header["$INSUNITS"] = units.MM
-
-  msp = doc.modelspace()
-
-  # 1. Setup Layers matching professional sample standards
-  layers = [
-      ("M-Ac-Chw-Supply", 3, "CONTINUOUS"),  # Green / Supply
-      ("CHWS", 3, "CONTINUOUS"),
-      ("M-Ac-Chw-Return", 5, "CONTINUOUS"),  # Blue / Return
-      ("CHWR", 5, "CONTINUOUS"),
-      ("M-Ac-Equipment", 7, "CONTINUOUS"),  # White / Equipment geometry
-      ("M-Ac-Valve", 2, "CONTINUOUS"),  # Yellow / Valves
-  ]
-
-  for name, color, linetype in layers:
-    if name not in doc.layers:
-      doc.layers.new(name, dxfattribs={"color": color, "linetype": linetype})
-
-  # 2. Setup Text Styles
-  if "ROMANS" not in doc.styles:
-    doc.styles.new("ROMANS", dxfattribs={"font": "romans.shx"})
-  if "Ac-Text" not in doc.styles:
-    doc.styles.new("Ac-Text", dxfattribs={"font": "txt.shx"})
-
-  # 3. Create Standardized AHU Block Definition
-  ahu_block = doc.blocks.new(name="EQ-AHU-STD")
-  ahu_block.add_lwpolyline(
-      [(0, 0), (800, 0), (800, 500), (0, 500), (0, 0)],
-      dxfattribs={"layer": "M-Ac-Equipment"},
-  )
-  ahu_block.add_lwpolyline(
-      [(200, 100), (250, 400), (300, 100), (350, 400), (400, 100)],
-      dxfattribs={"layer": "M-Ac-Equipment"},
-  )
-  ahu_block.add_circle(
-      (600, 250), radius=100, dxfattribs={"layer": "M-Ac-Equipment"}
-  )
-
-  ahu_block.add_attdef(
-      "EQUIP_TAG",
-      (400, 420),
-      "Equipment Tag:",
-      dxfattribs={"height": 35, "style": "ROMANS", "layer": "0"},
-  )
-  ahu_block.add_attdef(
-      "CAPACITY",
-      (400, 370),
-      "Cooling Capacity (TR):",
-      dxfattribs={"height": 25, "style": "ROMANS", "layer": "0"},
-  )
-  ahu_block.add_attdef(
-      "AIRFLOW",
-      (400, 320),
-      "Airflow (CFM):",
-      dxfattribs={"height": 25, "style": "ROMANS", "layer": "0"},
-  )
-
-  # 4. Create Standardized FCU Block Definition
-  fcu_block = doc.blocks.new(name="EQ-FCU-STD")
-  fcu_block.add_lwpolyline(
-      [(0, 0), (500, 0), (500, 350), (0, 350), (0, 0)],
-      dxfattribs={"layer": "M-Ac-Equipment"},
-  )
-  fcu_block.add_lwpolyline(
-      [(150, 80), (190, 270), (230, 80), (270, 270)],
-      dxfattribs={"layer": "M-Ac-Equipment"},
-  )
-  fcu_block.add_circle(
-      (380, 175), radius=70, dxfattribs={"layer": "M-Ac-Equipment"}
-  )
-
-  fcu_block.add_attdef(
-      "EQUIP_TAG",
-      (250, 290),
-      "Equipment Tag:",
-      dxfattribs={"height": 30, "style": "ROMANS", "layer": "0"},
-  )
-  fcu_block.add_attdef(
-      "CAPACITY",
-      (250, 250),
-      "Cooling Capacity (TR):",
-      dxfattribs={"height": 20, "style": "ROMANS", "layer": "0"},
-  )
-  fcu_block.add_attdef(
-      "AIRFLOW",
-      (250, 210),
-      "Airflow (CFM):",
-      dxfattribs={"height": 20, "style": "ROMANS", "layer": "0"},
-  )
-
-  # 5. Process Equipment Schedule and Place Blocks Dynamically
-  start_x = 1000
-  spacing_x = 1800
-  y_pos = 1000
-
-  for index, row in df_equipment.iterrows():
-    eq_type = str(row.get("Type", "AHU")).upper()
-    eq_tag = str(row.get("Tag", f"EQ-{index+1}"))
-    eq_cap = str(row.get("Capacity", "10.0 TR"))
-    eq_air = str(row.get("Airflow", "2000 CFM"))
-
-    current_x = start_x + (index * spacing_x)
-
-    if "FCU" in eq_type:
-      ref = msp.add_blockref("EQ-FCU-STD", insert=(current_x, y_pos))
-    else:
-      ref = msp.add_blockref("EQ-AHU-STD", insert=(current_x, y_pos))
-
-    ref.add_attrib("EQUIP_TAG", eq_tag)
-    ref.add_attrib("CAPACITY", eq_cap)
-    ref.add_attrib("AIRFLOW", eq_air)
-
-    # Draw localized connection line stub to main headers
-    msp.add_line(
-        (current_x + 250, y_pos + 500),
-        (current_x + 250, y_pos + 1500),
-        dxfattribs={"layer": "M-Ac-Chw-Supply"},
-    )
-    msp.add_line(
-        (current_x + 250, y_pos),
-        (current_x + 250, y_pos - 200),
-        dxfattribs={"layer": "M-Ac-Chw-Return"},
-    )
-
-  # Draw Chilled Water Main Piping Headers spanning across all units
-  total_width = max(3500, start_x + (len(df_equipment) * spacing_x))
-  msp.add_line(
-      (500, y_pos + 1500),
-      (total_width, y_pos + 1500),
-      dxfattribs={"layer": "M-Ac-Chw-Supply"},
-  )
-  msp.add_line(
-      (500, y_pos - 200),
-      (total_width, y_pos - 200),
-      dxfattribs={"layer": "M-Ac-Chw-Return"},
-  )
-
-  # Write to string buffer and convert to bytes
-  string_stream = io.StringIO()
-  doc.write(string_stream)
-  stream = io.BytesIO(string_stream.getvalue().encode("utf-8"))
-  stream.seek(0)
-  return stream
-
-
-# Main App UI Workflow
-if uploaded_file is not None:
+if uploaded_file:
   try:
-    if uploaded_file.name.endswith(".csv"):
-      df = pd.read_csv(uploaded_file)
-    else:
-      df = pd.read_excel(uploaded_file)
+    df = pd.read_excel(uploaded_file)
+    df.columns = df.columns.str.strip()
 
-    st.subheader("Uploaded Equipment Schedule Preview")
+    # --- SMART COLUMN MAPPING ---
+    rename_map = {}
+    for col in df.columns:
+      c_lower = col.lower()
+      if "riser" in c_lower:
+        rename_map[col] = "Riser_ID"
+      elif "floor" in c_lower:
+        rename_map[col] = "Floor"
+      elif "tag" in c_lower or "ahu" in c_lower or "equipment" in c_lower:
+        rename_map[col] = "AHU_Tag"
+      elif c_lower in ["gpm", "flow", "design_gpm", "flow_gpm"]:
+        rename_map[col] = "Design_GPM"
+      elif c_lower in ["tr", "ton", "tons", "rt", "cooling_tr"]:
+        rename_map[col] = "TR"
+
+    df = df.rename(columns=rename_map)
+
+    if "Design_GPM" not in df.columns and "TR" in df.columns:
+      df["Design_GPM"] = df["TR"] * default_tr_to_gpm
+    elif "TR" not in df.columns and "Design_GPM" in df.columns:
+      df["TR"] = df["Design_GPM"] / default_tr_to_gpm
+    elif "Design_GPM" not in df.columns and "TR" not in df.columns:
+      st.error(
+          "❌ Excel sheet must contain either a 'Flow/GPM' column or a"
+          " 'TR/Tonnage' column."
+      )
+      st.stop()
+
+    required_cols = ["Riser_ID", "Floor", "AHU_Tag", "Design_GPM", "TR"]
+    missing_cols = [c for c in required_cols if c not in df.columns]
+    if missing_cols:
+      st.error(
+          f"❌ Missing required columns: {missing_cols}. Detected columns:"
+          f" {list(df.columns)}"
+      )
+      st.stop()
+
+    st.success("✅ Design Data successfully loaded, mapped, and verified!")
     st.dataframe(df, use_container_width=True)
 
-    if st.button("Generate & Download Professional DXF Schematic"):
-      dxf_stream = generate_dxf_bytes(df)
-      st.success(
-          "DXF schematic generated successfully from your equipment schedule!"
-      )
-      st.download_button(
-          label="Download Chilled_Water_Schematic.dxf",
-          data=dxf_stream,
-          file_name="Chilled_Water_Schematic.dxf",
-          mime="application/dxf",
-      )
+    if st.button("Generate Professional P&ID & CSI BOQ", type="primary"):
+      with st.spinner(
+          "Executing hydraulic calculations, sizing, and building CSI Division"
+          " 23 BOQ..."
+      ):
+        header_gpm = df["Design_GPM"].sum()
+        header_tr = df["TR"].sum()
+        header_pipe = calc_pipe_size(header_gpm)
+
+        unique_risers = df["Riser_ID"].unique()
+        num_risers = len(unique_risers)
+
+        doc = ezdxf.new(dxfversion="R2010")
+        msp = doc.modelspace()
+
+        # Layers setup
+        doc.layers.add("CHWS_PIPE", color=5)
+        doc.layers.add("CHWR_PIPE", color=1)
+        doc.layers.add("VALVES", color=3)
+        doc.layers.add("INSTRUMENTATION", color=2)
+        doc.layers.add("AHU_EQUIP", color=7)
+        doc.layers.add("ANNOTATIONS", color=7)
+
+        riser_spacing = 180
+        floor_height = 55
+        riser_offset = 20
+        header_offset = 30
+
+        header_length = (num_risers * riser_spacing) + 80
+
+        msp.add_line(
+            (0, 0),
+            (header_length, 0),
+            dxfattribs={"layer": "CHWS_PIPE"},
+        )
+        msp.add_line(
+            (0, -header_offset),
+            (header_length, -header_offset),
+            dxfattribs={"layer": "CHWR_PIPE"},
+        )
+
+        draw_valve(msp, 40, 0, "BFV-MAIN", "VALVES")
+        draw_valve(msp, 40, -header_offset, "BFV-MAIN", "VALVES")
+
+        msp.add_text(
+            f"MAIN CHWS HEADER: {header_tr:.1f} TR | {header_gpm:.1f} GPM |"
+            f' SIZE: {header_pipe}" DIA',
+            dxfattribs={"height": 3.5, "layer": "ANNOTATIONS"},
+        ).set_placement((10, 5))
+        msp.add_text(
+            f"MAIN CHWR HEADER: {header_tr:.1f} TR | {header_gpm:.1f} GPM |"
+            f' SIZE: {header_pipe}" DIA',
+            dxfattribs={"height": 3.5, "layer": "ANNOTATIONS"},
+        ).set_placement((10, -header_offset - 6))
+
+        boq_dict = {}
+
+        def add_csi_item(csi_code, desc, size_rating, qty, unit="EA"):
+          key = (csi_code, desc, size_rating, unit)
+          boq_dict[key] = boq_dict.get(key, 0.0) + qty
+
+        add_csi_item(
+            "23 21 13",
+            "Hydronic Piping - Chilled Water Main Header (Supply & Return)",
+            f'{header_pipe}" Dia',
+            header_length * 2,
+            "ft",
+        )
+        add_csi_item(
+            "23 05 23",
+            "Butterfly Valve (Isolation - Main Header)",
+            f'{header_pipe}" Size',
+            2,
+            "EA",
+        )
+
+        for i, riser_id in enumerate(unique_risers):
+          riser_data = df[df["Riser_ID"] == riser_id].sort_values(by="Floor")
+          riser_gpm = riser_data["Design_GPM"].sum()
+          riser_tr = riser_data["TR"].sum()
+          riser_pipe = calc_pipe_size(riser_gpm)
+
+          r_chws_x = (i + 1) * riser_spacing
+          r_chwr_x = r_chws_x + riser_offset
+
+          max_floor = riser_data["Floor"].max()
+          riser_top_y = (max_floor * floor_height) + 25
+
+          msp.add_line(
+              (r_chws_x, 0),
+              (r_chws_x, riser_top_y),
+              dxfattribs={"layer": "CHWS_PIPE"},
+          )
+          msp.add_line(
+              (r_chwr_x, -header_offset),
+              (r_chwr_x, riser_top_y),
+              dxfattribs={"layer": "CHWR_PIPE"},
+          )
+
+          add_csi_item(
+              "23 21 13",
+              (
+                  f"Hydronic Piping - Chilled Water Riser {riser_id} (Supply &"
+                  " Return)"
+              ),
+              f'{riser_pipe}" Dia',
+              riser_top_y * 2,
+              "ft",
+          )
+
+          draw_valve(msp, r_chws_x, 10, f"BFV-R{riser_id}", "VALVES")
+          draw_valve(msp, r_chwr_x, 10, f"BFV-R{riser_id}", "VALVES")
+          add_csi_item(
+              "23 05 23",
+              f"Butterfly Valve (Isolation - Riser {riser_id} Base)",
+              f'{riser_pipe}" Size',
+              2,
+              "EA",
+          )
+
+          draw_instrument(
+              msp, r_chws_x, riser_top_y - 10, "DPT", "INSTRUMENTATION"
+          )
+          add_csi_item(
+              "23 05 19",
+              (
+                  "Differential Pressure Transmitter (DPT) - Riser"
+                  f" {riser_id}"
+              ),
+              f'{riser_pipe}" Loop',
+              1,
+              "EA",
+          )
+
+          msp.add_text(
+              f"RISER {riser_id}: {riser_tr:.1f} TR | {riser_gpm:.1f} GPM |"
+              f' {riser_pipe}" DIA',
+              dxfattribs={"height": 2.5, "layer": "ANNOTATIONS"},
+          ).set_placement((r_chws_x - 10, riser_top_y + 4))
+
+          for _, row in riser_data.iterrows():
+            floor_y = row["Floor"] * floor_height
+            ahu_tag = row["AHU_Tag"]
+            ahu_gpm = row["Design_GPM"]
+            ahu_tr = row["TR"]
+            ahu_pipe = calc_pipe_size(ahu_gpm)
+
+            branch_end_x = r_chwr_x + 65
+
+            msp.add_line(
+                (r_chws_x, floor_y),
+                (branch_end_x, floor_y),
+                dxfattribs={"layer": "CHWS_PIPE"},
+            )
+            msp.add_line(
+                (r_chwr_x, floor_y - 12),
+                (branch_end_x, floor_y - 12),
+                dxfattribs={"layer": "CHWR_PIPE"},
+            )
+
+            add_csi_item(
+                "23 21 13",
+                f"Hydronic Piping - AHU Branch Line ({ahu_tag})",
+                f'{ahu_pipe}" Dia',
+                130,
+                "ft",
+            )
+            add_csi_item(
+                "23 73 13",
+                (
+                    "Indoor Central-Station Air-Handling Unit"
+                    f" ({ahu_tag})"
+                ),
+                f"{ahu_tr:.1f} TR / {ahu_gpm:.1f} GPM",
+                1,
+                "EA",
+            )
+
+            draw_valve(msp, r_chws_x + 15, floor_y, "BFV", "VALVES")
+            draw_strainer(msp, r_chws_x + 28, floor_y, "VALVES")
+            draw_control_valve(msp, r_chws_x + 42, floor_y, "MCV", "VALVES")
+            draw_instrument(
+                msp, r_chws_x + 55, floor_y + 4, "PI/TI", "INSTRUMENTATION"
+            )
+
+            draw_valve(msp, r_chwr_x + 15, floor_y - 12, "BFV", "VALVES")
+            draw_valve(msp, r_chwr_x + 35, floor_y - 12, "BV", "VALVES")
+            draw_instrument(
+                msp, r_chwr_x + 50, floor_y - 8, "PI/TI", "INSTRUMENTATION"
+            )
+
+            add_csi_item(
+                "23 05 23",
+                "Butterfly Valve (Isolation - Equipment Drop)",
+                f'{ahu_pipe}" Size',
+                2,
+                "EA",
+            )
+            add_csi_item(
+                "23 21 16",
+                "Y-Strainer with SS Screen",
+                f'{ahu_pipe}" Size',
+                1,
+                "EA",
+            )
+            add_csi_item(
+                "23 09 23",
+                "Motorized 2-Way Control Valve with Actuator",
+                f'{ahu_pipe}" Size',
+                1,
+                "EA",
+            )
+            add_csi_item(
+                "23 05 23",
+                "Manual Hydronic Balancing Valve",
+                f'{ahu_pipe}" Size',
+                1,
+                "EA",
+            )
+            add_csi_item(
+                "23 05 19",
+                "Pressure & Temperature Gauge Assembly (PI/TI Set)",
+                f'{ahu_pipe}" Size',
+                2,
+                "SET",
+            )
+
+            msp.add_text(
+                f"EQ: {ahu_tag} | {ahu_tr:.1f} TR | {ahu_gpm:.1f} GPM",
+                dxfattribs={"height": 2.2, "layer": "ANNOTATIONS"},
+            ).set_placement((branch_end_x + 3, floor_y + 2))
+            msp.add_text(
+                f'Line Size: {ahu_pipe}" DIA',
+                dxfattribs={"height": 1.6, "layer": "ANNOTATIONS"},
+            ).set_placement((branch_end_x + 3, floor_y - 4))
+
+        stream = io.StringIO()
+        doc.write(stream)
+        st.session_state["dxf_data"] = stream.getvalue()
+
+        boq_rows = []
+        for (csi_code, desc, size_rating, unit), qty in sorted(
+            boq_dict.items(), key=lambda x: (x[0][0], x[0][1], x[0][2])
+        ):
+          boq_rows.append({
+              "CSI Section": csi_code,
+              "Item Description": desc,
+              "Size / Rating": size_rating,
+              "Quantity": round(qty, 1) if unit == "ft" else int(qty),
+              "Unit": unit,
+          })
+
+        st.session_state["boq_df"] = pd.DataFrame(boq_rows)
+
+        excel_buffer = io.BytesIO()
+        with pd.ExcelWriter(excel_buffer, engine="openpyxl") as writer:
+          st.session_state["boq_df"].to_excel(
+              writer, index=False, sheet_name="CSI_Division_23_BOQ"
+          )
+        st.session_state["excel_data"] = excel_buffer.getvalue()
+        st.session_state["generated"] = True
 
   except Exception as e:
     st.error(
-        f"Error reading the uploaded file. Please ensure columns match ('Type', 'Tag', 'Capacity', 'Airflow'). Details: {e}"
+        "Error reading file. Please ensure it is a valid Excel sheet. Error:"
+        f" {e}"
     )
+    st.stop()
+
+# --- PERSISTENT RESULTS RENDERER ---
+if st.session_state.get("generated", False):
+  st.success(
+      "🎉 Consultant P&ID Schematic & CSI MasterFormat Division 23 BOQ Generated"
+      " Successfully!"
+  )
+  col1, col2 = st.columns(2)
+  col1.download_button(
+      "📥 Download Consultant P&ID DXF",
+      data=st.session_state["dxf_data"],
+      file_name="Consultant_HVAC_PID_Schematic.dxf",
+      mime="image/vnd.dxf",
+  )
+  col2.download_button(
+      "📥 Download CSI-Format Excel BOQ",
+      data=st.session_state["excel_data"],
+      file_name="CSI_Division_23_HVAC_BOQ.xlsx",
+      mime=(
+          "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+      ),
+  )
+
+  st.subheader("CSI MasterFormat Division 23 Bill of Quantities (BOQ) Preview")
+  st.dataframe(st.session_state["boq_df"], use_container_width=True)
 else:
   st.info(
-      "👈 Please upload your Excel or CSV equipment schedule in the sidebar to"
-      " get started."
+      "👆 Please upload your Excel Design Summary to generate the consultant"
+      " P&ID schematic and CSI-format BOQ."
   )
