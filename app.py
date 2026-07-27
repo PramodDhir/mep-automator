@@ -67,22 +67,18 @@ def generate_dxf_bytes(
 
   # 3. Create Standardized AHU Block Definition
   ahu_block = doc.blocks.new(name="EQ-AHU-STD")
-  # Outer Casing (Rectangle 800x500)
   ahu_block.add_lwpolyline(
       [(0, 0), (800, 0), (800, 500), (0, 500), (0, 0)],
       dxfattribs={"layer": "M-Ac-Equipment"},
   )
-  # Internal Coil Representation (Zigzag)
   ahu_block.add_lwpolyline(
       [(200, 100), (250, 400), (300, 100), (350, 400), (400, 100)],
       dxfattribs={"layer": "M-Ac-Equipment"},
   )
-  # Fan Blower Circle
   ahu_block.add_circle(
       (600, 250), radius=100, dxfattribs={"layer": "M-Ac-Equipment"}
   )
 
-  # Embedded Attributes for AHU
   ahu_block.add_attdef(
       "EQUIP_TAG",
       (400, 420),
@@ -102,24 +98,20 @@ def generate_dxf_bytes(
       dxfattribs={"height": 25, "style": "ROMANS", "layer": "0"},
   )
 
-  # 4. Create Standardized FCU Block Definition (Uniform graphical standard)
+  # 4. Create Standardized FCU Block Definition
   fcu_block = doc.blocks.new(name="EQ-FCU-STD")
-  # Outer Casing (Rectangle 500x350)
   fcu_block.add_lwpolyline(
       [(0, 0), (500, 0), (500, 350), (0, 350), (0, 0)],
       dxfattribs={"layer": "M-Ac-Equipment"},
   )
-  # Internal Coil
   fcu_block.add_lwpolyline(
       [(150, 80), (190, 270), (230, 80), (270, 270)],
       dxfattribs={"layer": "M-Ac-Equipment"},
   )
-  # Fan Circle
   fcu_block.add_circle(
       (380, 175), radius=70, dxfattribs={"layer": "M-Ac-Equipment"}
   )
 
-  # Embedded Attributes for FCU
   fcu_block.add_attdef(
       "EQUIP_TAG",
       (250, 290),
@@ -150,15 +142,15 @@ def generate_dxf_bytes(
   fcu_ref.add_attrib("CAPACITY", f_cap)
   fcu_ref.add_attrib("AIRFLOW", f_air)
 
-  # Draw Chilled Water Main Piping Headers
   msp.add_line(
       (500, 1500), (3500, 1500), dxfattribs={"layer": "M-Ac-Chw-Supply"}
   )
   msp.add_line((500, 800), (3500, 800), dxfattribs={"layer": "M-Ac-Chw-Return"})
 
-  # Write to an in-memory byte buffer
-  stream = io.BytesIO()
-  doc.write(stream)
+  # Write to an in-memory string buffer, then encode to bytes for download
+  string_stream = io.StringIO()
+  doc.write(string_stream)
+  stream = io.BytesIO(string_stream.getvalue().encode("utf-8"))
   stream.seek(0)
   return stream
 
