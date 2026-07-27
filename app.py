@@ -7,7 +7,7 @@ import io
 # --- PAGE SETUP ---
 st.set_page_config(page_title="Professional HVAC P&ID & Schematic Automator", layout="wide")
 st.title("❄️ Advanced HVAC P&ID Schematic & BOQ Automator")
-st.markdown("Generate consultant-grade HVAC schematics, instrumentation loops, and comprehensive BOQ from your design summary.")
+st.markdown("Generate consultant-grade HVAC P&ID schematics with fully drawn valves, instrumentation loops, and detailed BOQ from your design summary.")
 
 # --- SIZING CRITERIA ---
 with st.expander("Hydraulic Design & Sizing Criteria", expanded=False):
@@ -24,6 +24,30 @@ def calc_pipe_size(gpm):
     for size in standard_sizes:
         if size >= theoretical_dia: return size
     return standard_sizes[-1]
+
+# --- DXF GRAPHICAL SYMBOL HELPERS ---
+def draw_valve(msp, x, y, tag="BFV", layer="VALVES"):
+    # Draws a professional 2-triangle valve symbol
+    msp.add_lwpolyline([(x-2, y+1.2), (x+2, y-1.2), (x+2, y+1.2), (x-2, y-1.2), (x-2, y+1.2)], dxfattribs={'layer': layer})
+    msp.add_text(tag, dxfattribs={'height': 1.2, 'layer': 'ANNOTATIONS'}).set_placement((x-2.5, y+1.5))
+
+def draw_control_valve(msp, x, y, tag="MCV", layer="VALVES"):
+    # Draws control valve with actuator box on top
+    msp.add_lwpolyline([(x-2, y+1.2), (x+2, y-1.2), (x+2, y+1.2), (x-2, y-1.2), (x-2, y+1.2)], dxfattribs={'layer': layer})
+    msp.add_line((x, y+1.2), (x, y+3.5), dxfattribs={'layer': layer})
+    msp.add_lwpolyline([(x-1.5, y+3.5), (x+1.5, y+3.5), (x+1.5, y+5), (x-1.5, y+5), (x-1.5, y+3.5)], dxfattribs={'layer': layer})
+    msp.add_text(tag, dxfattribs={'height': 1.2, 'layer': 'ANNOTATIONS'}).set_placement((x-2.5, y+5.2))
+
+def draw_strainer(msp, x, y, layer="VALVES"):
+    # Draws Y-Strainer symbol
+    msp.add_circle((x, y), radius=1.5, dxfattribs={'layer': layer})
+    msp.add_line((x-1.5, y+1.5), (x+1.5, y-1.5), dxfattribs={'layer': layer})
+    msp.add_text("STR", dxfattribs={'height': 1.1, 'layer': 'ANNOTATIONS'}).set_placement((x-2, y+2))
+
+def draw_instrument(msp, x, y, label="PI/TI", layer="INSTRUMENTATION"):
+    # Draws gauge/instrument circle
+    msp.add_circle((x, y), radius=1.8, dxfattribs={'layer': layer})
+    msp.add_text(label, dxfattribs={'height': 1.1, 'layer': 'ANNOTATIONS'}).set_placement((x-2, y+2.2))
 
 # --- FILE UPLOAD WORKFLOW ---
 uploaded_file = st.file_uploader("Upload Design Summary Excel Sheet (.xlsx)", type=["xlsx"])
@@ -50,7 +74,6 @@ if uploaded_file:
         
         df = df.rename(columns=rename_map)
         
-        # Ensure both Design_GPM and TR exist
         if 'Design_GPM' not in df.columns and 'TR' in df.columns:
             df['Design_GPM'] = df['TR'] * default_tr_to_gpm
         elif 'TR' not in df.columns and 'Design_GPM' in df.columns:
@@ -66,13 +89,13 @@ if uploaded_file:
             st.stop()
             
         st.success("✅ Design Data successfully loaded, mapped, and verified!")
-        st.dataframe(df, use_container_width=True)
+        st.dataframe(df, width='stretch')
     except Exception as e:
         st.error(f"Error reading file. Please ensure it is a valid Excel sheet. Error: {e}")
         st.stop()
 
     if st.button("Generate Professional P&ID Schematic & BOQ", type="primary"):
-        with st.spinner("Executing hydraulic calculations and drafting professional MEP schematics..."):
+        with st.spinner("Executing hydraulic calculations and drafting consultant-grade P&ID graphics..."):
             
             header_gpm = df['Design_GPM'].sum()
             header_tr = df['TR'].sum()
@@ -92,22 +115,26 @@ if uploaded_file:
             doc.layers.add("AHU_EQUIP", color=7)       # White - Equipment outlines
             doc.layers.add("ANNOTATIONS", color=7)     # White - Text & Tags
 
-            riser_spacing = 150
-            floor_height = 45
-            riser_offset = 15
-            header_offset = 25
+            riser_spacing = 180
+            floor_height = 55
+            riser_offset = 20
+            header_offset = 30
             
-            header_length = (num_risers * riser_spacing) + 60
+            header_length = (num_risers * riser_spacing) + 80
             
             # Draw Main Header Pipes
             msp.add_line((0, 0), (header_length, 0), dxfattribs={'layer': 'CHWS_PIPE'})
             msp.add_line((0, -header_offset), (header_length, -header_offset), dxfattribs={'layer': 'CHWR_PIPE'})
             
-            msp.add_text(f"MAIN CHWS HEADER: {header_tr:.1f} TR | {header_gpm:.1f} GPM | SIZE: {header_pipe}\" DIA", dxfattribs={'height': 3.5, 'layer': 'ANNOTATIONS'}).set_placement((10, 4))
-            msp.add_text(f"MAIN CHWR HEADER: {header_tr:.1f} TR | {header_gpm:.1f} GPM | SIZE: {header_pipe}\" DIA", dxfattribs={'height': 3.5, 'layer': 'ANNOTATIONS'}).set_placement((10, -header_offset - 5))
+            # Main Header Isolation Valves
+            draw_valve(msp, 40, 0, "BFV-MAIN", "VALVES")
+            draw_valve(msp, 40, -header_offset, "BFV-MAIN", "VALVES")
+
+            msp.add_text(f"MAIN CHWS HEADER: {header_tr:.1f} TR | {header_gpm:.1f} GPM | SIZE: {header_pipe}\" DIA", dxfattribs={'height': 3.5, 'layer': 'ANNOTATIONS'}).set_placement((10, 5))
+            msp.add_text(f"MAIN CHWR HEADER: {header_tr:.1f} TR | {header_gpm:.1f} GPM | SIZE: {header_pipe}\" DIA", dxfattribs={'height': 3.5, 'layer': 'ANNOTATIONS'}).set_placement((10, -header_offset - 6))
 
             total_pipe_length = header_length * 2
-            total_bfv = 2 # Main header isolation
+            total_bfv = 2
             total_cv = 0
             total_balancing = 0
             total_ystrainer = 0
@@ -124,18 +151,22 @@ if uploaded_file:
                 r_chwr_x = r_chws_x + riser_offset
                 
                 max_floor = riser_data['Floor'].max()
-                riser_top_y = (max_floor * floor_height) + 20
+                riser_top_y = (max_floor * floor_height) + 25
                 
                 # Draw Riser Stacks
                 msp.add_line((r_chws_x, 0), (r_chws_x, riser_top_y), dxfattribs={'layer': 'CHWS_PIPE'})
                 msp.add_line((r_chwr_x, -header_offset), (r_chwr_x, riser_top_y), dxfattribs={'layer': 'CHWR_PIPE'})
                 total_pipe_length += (riser_top_y * 2)
                 
+                # Riser Isolation Butterfly Valves & DPT Graphics
+                draw_valve(msp, r_chws_x, 10, f"BFV-R{riser_id}", "VALVES")
+                draw_valve(msp, r_chwr_x, 10, f"BFV-R{riser_id}", "VALVES")
                 total_bfv += 2 
+                
+                draw_instrument(msp, r_chws_x, riser_top_y - 10, "DPT", "INSTRUMENTATION")
                 total_dpt += 1 
                 
-                msp.add_text(f"RISER {riser_id}: {riser_tr:.1f} TR | {riser_gpm:.1f} GPM | {riser_pipe}\" DIA", dxfattribs={'height': 2.5, 'layer': 'ANNOTATIONS'}).set_placement((r_chws_x - 10, riser_top_y + 3))
-                msp.add_text("[DPT]", dxfattribs={'height': 2, 'layer': 'INSTRUMENTATION'}).set_placement((r_chws_x - 5, riser_top_y - 5))
+                msp.add_text(f"RISER {riser_id}: {riser_tr:.1f} TR | {riser_gpm:.1f} GPM | {riser_pipe}\" DIA", dxfattribs={'height': 2.5, 'layer': 'ANNOTATIONS'}).set_placement((r_chws_x - 10, riser_top_y + 4))
 
                 for _, row in riser_data.iterrows():
                     floor_y = row['Floor'] * floor_height
@@ -144,14 +175,28 @@ if uploaded_file:
                     ahu_tr = row['TR']
                     ahu_pipe = calc_pipe_size(ahu_gpm)
                     
-                    branch_end_x = r_chwr_x + 50
+                    branch_end_x = r_chwr_x + 65
                     
+                    # Branch lines to AHU
                     msp.add_line((r_chws_x, floor_y), (branch_end_x, floor_y), dxfattribs={'layer': 'CHWS_PIPE'})
-                    msp.add_line((r_chwr_x, floor_y - 10), (branch_end_x, floor_y - 10), dxfattribs={'layer': 'CHWR_PIPE'})
-                    total_pipe_length += 100
+                    msp.add_line((r_chwr_x, floor_y - 12), (branch_end_x, floor_y - 12), dxfattribs={'layer': 'CHWR_PIPE'})
+                    total_pipe_length += 130
                     
-                    msp.add_text(f"TAG: {ahu_tag} ({ahu_tr:.1f} TR | {ahu_gpm:.1f} GPM)", dxfattribs={'height': 2.2, 'layer': 'ANNOTATIONS'}).set_placement((branch_end_x + 2, floor_y + 2))
-                    msp.add_text(f"Supply Line: {ahu_pipe}\" DIA", dxfattribs={'height': 1.5, 'layer': 'ANNOTATIONS'}).set_placement((branch_end_x + 2, floor_y - 3))
+                    # Graphical Valve & Instrumentation Stations on Branch
+                    # Supply Line items: Isolation BFV, Y-Strainer, Control Valve, PI/TI Gauge
+                    draw_valve(msp, r_chws_x + 15, floor_y, "BFV", "VALVES")
+                    draw_strainer(msp, r_chws_x + 28, floor_y, "VALVES")
+                    draw_control_valve(msp, r_chws_x + 42, floor_y, "MCV", "VALVES")
+                    draw_instrument(msp, r_chws_x + 55, floor_y + 4, "PI/TI", "INSTRUMENTATION")
+
+                    # Return Line items: Isolation BFV, Balancing Valve, PI/TI Gauge
+                    draw_valve(msp, r_chwr_x + 15, floor_y - 12, "BFV", "VALVES")
+                    draw_valve(msp, r_chwr_x + 35, floor_y - 12, "BV", "VALVES")
+                    draw_instrument(msp, r_chwr_x + 50, floor_y - 8, "PI/TI", "INSTRUMENTATION")
+
+                    # Equipment Tag and Sizing Notes
+                    msp.add_text(f"EQ: {ahu_tag} | {ahu_tr:.1f} TR | {ahu_gpm:.1f} GPM", dxfattribs={'height': 2.2, 'layer': 'ANNOTATIONS'}).set_placement((branch_end_x + 3, floor_y + 2))
+                    msp.add_text(f"Line Size: {ahu_pipe}\" DIA", dxfattribs={'height': 1.6, 'layer': 'ANNOTATIONS'}).set_placement((branch_end_x + 3, floor_y - 4))
                     
                     total_bfv += 2     
                     total_ystrainer += 1 
@@ -163,14 +208,15 @@ if uploaded_file:
             doc.write(stream)
             dxf_data = stream.getvalue()
 
+            # --- BOQ DATAFRAME ---
             boq_df = pd.DataFrame({
                 "Item Description": [
                     "Chilled Water Piping (Total Mixed Header, Riser & Branch Sizes)",
-                    "Butterfly Valves (Isolation - Mains & Risers & Equipment)",
-                    "Motorized Control Valves (AHU Coil Control)",
-                    "Manual Balancing Valves (AHU Return Line)",
-                    "Y-Strainers with SS Screen (AHU Supply Line)",
-                    "Differential Pressure Transmitters (DPT Loops)",
+                    "Butterfly Valves (Isolation - Mains, Risers & Equipment Drops)",
+                    "Motorized 2-Way Control Valves (AHU Coil Loops)",
+                    "Manual Balancing Valves (AHU Return Lines)",
+                    "Y-Strainers with SS Screen (AHU Supply Lines)",
+                    "Differential Pressure Transmitters (Riser DPT Loops)",
                     "Pressure & Temperature Gauge Assemblies (PI/TI Sets)"
                 ],
                 "Quantity": [
@@ -190,12 +236,12 @@ if uploaded_file:
                 boq_df.to_excel(writer, index=False, sheet_name='HVAC_BOQ')
             excel_data = excel_buffer.getvalue()
 
-            st.success("🎉 Professional P&ID Schematic & Detailed BOQ Generated Successfully!")
+            st.success("🎉 Consultant P&ID Schematic with Fully Drawn Symbols & BOQ Generated Successfully!")
             col1, col2 = st.columns(2)
-            col1.download_button("📥 Download Consultant P&ID DXF", data=dxf_data, file_name="Professional_HVAC_Schematic.dxf", mime="image/vnd.dxf")
+            col1.download_button("📥 Download Consultant P&ID DXF", data=dxf_data, file_name="Consultant_HVAC_PID_Schematic.dxf", mime="image/vnd.dxf")
             col2.download_button("📥 Download Updated Excel BOQ", data=excel_data, file_name="HVAC_Detailed_BOQ.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
             
             st.subheader("Comprehensive Bill of Quantities (BOQ) Preview")
-            st.dataframe(boq_df, use_container_width=True)
+            st.dataframe(boq_df, width='stretch')
 else:
-    st.info("👆 Please upload your Excel Design Summary (containing design flow rates or tonnage) to generate the professional schematic and BOQ.")
+    st.info("👆 Please upload your Excel Design Summary (containing custom design flow rates or tonnage) to generate the consultant P&ID schematic and BOQ.")
