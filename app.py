@@ -14,7 +14,7 @@ with st.expander("Hydraulic Design & Sizing Criteria", expanded=False):
     col1, col2, col3 = st.columns(3)
     delta_t_f = col1.number_input("Design Delta T (°F)", value=12.0)
     max_vel_fps = col2.number_input("Max Allowable Velocity (fps)", value=8.0)
-    default_tr_to_gpm = col3.number_input("GPM per TR Factor", value=2.0) # (24 / Delta_T)
+    default_tr_to_gpm = col3.number_input("GPM per TR Factor", value=2.0)
 
 standard_sizes = [0.5, 0.75, 1.0, 1.25, 1.5, 2.0, 2.5, 3.0, 4.0, 5.0, 6.0, 8.0, 10.0, 12.0, 14.0, 16.0, 18.0, 20.0, 24.0, 30.0, 36.0]
 
@@ -50,18 +50,16 @@ if uploaded_file:
         
         df = df.rename(columns=rename_map)
         
-        # Determine Flow Rates
-        if 'Design_GPM' not in df.columns:
-            if 'TR' in df.columns:
-                df['Design_GPM'] = df['TR'] * default_tr_to_gpm
-            else:
-                st.error("❌ Excel sheet must contain either a 'Flow/GPM' column or a 'TR/Tonnage' column.")
-                st.stop()
-        else:
-            if 'TR' not in df.columns:
-                df['TR'] = df['Design_GPM'] / default_tr_to_gpm
+        # Ensure both Design_GPM and TR exist
+        if 'Design_GPM' not in df.columns and 'TR' in df.columns:
+            df['Design_GPM'] = df['TR'] * default_tr_to_gpm
+        elif 'TR' not in df.columns and 'Design_GPM' in df.columns:
+            df['TR'] = df['Design_GPM'] / default_tr_to_gpm
+        elif 'Design_GPM' not in df.columns and 'TR' not in df.columns:
+            st.error("❌ Excel sheet must contain either a 'Flow/GPM' column or a 'TR/Tonnage' column.")
+            st.stop()
 
-        required_cols = ['Riser_ID', 'Floor', 'AHU_Tag', 'Design_GPM']
+        required_cols = ['Riser_ID', 'Floor', 'AHU_Tag', 'Design_GPM', 'TR']
         missing_cols = [c for c in required_cols if c not in df.columns]
         if missing_cols:
             st.error(f"❌ Missing required columns: {missing_cols}. Detected columns: {list(df.columns)}")
@@ -105,8 +103,8 @@ if uploaded_file:
             msp.add_line((0, 0), (header_length, 0), dxfattribs={'layer': 'CHWS_PIPE'})
             msp.add_line((0, -header_offset), (header_length, -header_offset), dxfattribs={'layer': 'CHWR_PIPE'})
             
-            msp.add_text(f"MAIN CHWS HEADER: {header_tr:.1f} TR | {header_gpm:.1f} GPM | SIZE: {header_pipe}\" DIA", dxfattribs={'height': 3.5}).set_placement((10, 4))
-            msp.add_text(f"MAIN CHWR HEADER: {header_tr:.1f} TR | {header_gpm:.1f} GPM | SIZE: {header_pipe}\" DIA", dxfattribs={'height': 3.5}).set_placement((10, -header_offset - 5))
+            msp.add_text(f"MAIN CHWS HEADER: {header_tr:.1f} TR | {header_gpm:.1f} GPM | SIZE: {header_pipe}\" DIA", dxfattribs={'height': 3.5, 'layer': 'ANNOTATIONS'}).set_placement((10, 4))
+            msp.add_text(f"MAIN CHWR HEADER: {header_tr:.1f} TR | {header_gpm:.1f} GPM | SIZE: {header_pipe}\" DIA", dxfattribs={'height': 3.5, 'layer': 'ANNOTATIONS'}).set_placement((10, -header_offset - 5))
 
             total_pipe_length = header_length * 2
             total_bfv = 2 # Main header isolation
@@ -133,12 +131,11 @@ if uploaded_file:
                 msp.add_line((r_chwr_x, -header_offset), (r_chwr_x, riser_top_y), dxfattribs={'layer': 'CHWR_PIPE'})
                 total_pipe_length += (riser_top_y * 2)
                 
-                # Riser Isolation Butterfly Valves & DPT
-                total_bfv += 2 # Base isolation for supply & return risers
-                total_dpt += 1 # Differential Pressure Transmitter at top of riser
+                total_bfv += 2 
+                total_dpt += 1 
                 
-                msp.add_text(f"RISER {riser_id}: {riser_tr:.1f} TR | {riser_gpm:.1f} GPM | {riser_pipe}\" DIA", dxfattribs={'height': 2.5}).set_placement((r_chws_x - 10, riser_top_y + 3))
-                msp.add_text("[DPT]", dxfattribs={'height': 2}).set_placement((r_chws_x - 5, riser_top_y - 5), layer="INSTRUMENTATION")
+                msp.add_text(f"RISER {riser_id}: {riser_tr:.1f} TR | {riser_gpm:.1f} GPM | {riser_pipe}\" DIA", dxfattribs={'height': 2.5, 'layer': 'ANNOTATIONS'}).set_placement((r_chws_x - 10, riser_top_y + 3))
+                msp.add_text("[DPT]", dxfattribs={'height': 2, 'layer': 'INSTRUMENTATION'}).set_placement((r_chws_x - 5, riser_top_y - 5))
 
                 for _, row in riser_data.iterrows():
                     floor_y = row['Floor'] * floor_height
@@ -149,27 +146,23 @@ if uploaded_file:
                     
                     branch_end_x = r_chwr_x + 50
                     
-                    # Branch lines to AHU
                     msp.add_line((r_chws_x, floor_y), (branch_end_x, floor_y), dxfattribs={'layer': 'CHWS_PIPE'})
                     msp.add_line((r_chwr_x, floor_y - 10), (branch_end_x, floor_y - 10), dxfattribs={'layer': 'CHWR_PIPE'})
                     total_pipe_length += 100
                     
-                    # Instrumentation & Valve Station tags on P&ID
-                    msp.add_text(f"TAG: {ahu_tag} ({ahu_tr:.1f} TR | {ahu_gpm:.1f} GPM)", dxfattribs={'height': 2.2}).set_placement((branch_end_x + 2, floor_y + 2))
-                    msp.add_text(f"Supply Line: {ahu_pipe}\" DIA", dxfattribs={'height': 1.5}).set_placement((branch_end_x + 2, floor_y - 3))
+                    msp.add_text(f"TAG: {ahu_tag} ({ahu_tr:.1f} TR | {ahu_gpm:.1f} GPM)", dxfattribs={'height': 2.2, 'layer': 'ANNOTATIONS'}).set_placement((branch_end_x + 2, floor_y + 2))
+                    msp.add_text(f"Supply Line: {ahu_pipe}\" DIA", dxfattribs={'height': 1.5, 'layer': 'ANNOTATIONS'}).set_placement((branch_end_x + 2, floor_y - 3))
                     
-                    # Component counters per AHU connection
-                    total_bfv += 2     # Supply & Return isolation valves
-                    total_ystrainer += 1 # Y-Strainer on supply
-                    total_cv += 1      # Motorized 2-way control valve on supply
-                    total_balancing += 1 # Manual balancing valve on return
-                    total_pi_ti += 2   # Pressure/Temperature gauge pairs
+                    total_bfv += 2     
+                    total_ystrainer += 1 
+                    total_cv += 1      
+                    total_balancing += 1 
+                    total_pi_ti += 2   
 
             stream = io.StringIO()
             doc.write(stream)
             dxf_data = stream.getvalue()
 
-            # --- BOQ DATAFRAME ---
             boq_df = pd.DataFrame({
                 "Item Description": [
                     "Chilled Water Piping (Total Mixed Header, Riser & Branch Sizes)",
@@ -203,6 +196,6 @@ if uploaded_file:
             col2.download_button("📥 Download Updated Excel BOQ", data=excel_data, file_name="HVAC_Detailed_BOQ.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
             
             st.subheader("Comprehensive Bill of Quantities (BOQ) Preview")
-            st.table(boq_df)
+            st.dataframe(boq_df, use_container_width=True)
 else:
     st.info("👆 Please upload your Excel Design Summary (containing design flow rates or tonnage) to generate the professional schematic and BOQ.")
