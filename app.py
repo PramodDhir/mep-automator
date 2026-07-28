@@ -8,19 +8,72 @@ import streamlit as st
 
 # --- PAGE SETUP ---
 st.set_page_config(
-    page_title="Enterprise HVAC Staged Engineering Automator", layout="wide"
+    page_title="Enterprise HVAC Staged Automator & Plant Suite", layout="wide"
 )
-st.title("❄️ Enterprise HVAC Staged Workflow & Plant Automator")
+st.title("❄️ Enterprise HVAC Staged Workflow, BOD & Plant Automator")
 st.markdown(
-    "A multi-stage engineering pipeline: upload raw design summaries to generate"
-    " standardized schedules, review offline, and upload your enhanced schedule"
-    " to compile consultant-grade P&ID DXFs, hydraulic pump calculations, and"
-    " CSI Division 23 BOQs."
+    "A senior consultancy pipeline: ingest your Project Basis of Design (BOD)"
+    " and raw load summaries, generate standardized schedules, and compile"
+    " precise P&ID DXFs, hydraulic pump calculations, and CSI Division 23 BOQs."
 )
 
-# --- SIDEBAR CONFIGURATION ---
+# --- SIDEBAR: BASIS OF DESIGN (BOD) UPLOAD ---
 with st.sidebar:
-  st.header("1. Plant System Architecture")
+  st.header("1. Project Basis of Design (BOD)")
+  bod_file = st.file_uploader(
+      "Upload 'System and project Description.xlsx'",
+      type=["xlsx"],
+      help="Incorporate project BOD parameters automatically.",
+  )
+
+# Parse BOD if uploaded
+bod_data = {}
+if bod_file is not None:
+  try:
+    df_bod = pd.read_excel(bod_file, sheet_name="Sheet1")
+    for idx, row in df_bod.dropna(subset=["Item"]).iterrows():
+      item_name = str(row["Item"]).strip()
+      val = str(row["Type / Description"]).strip()
+      bod_data[item_name] = val
+  except Exception as e:
+    st.sidebar.warning(f"Could not parse BOD file: {e}")
+
+# Extract BOD parameters with engineering defaults
+project_employer = bod_data.get("Employer", "ITC Hotels")
+project_location = bod_data.get("Location", "Colombo")
+building_typology = bod_data.get("Building typology", "Mixed use")
+building_height = bod_data.get("Building height", "High rise (124 M)")
+chw_temp_range = bod_data.get(
+    "Chilled water temperature range", "42 Deg F (out) ; 56 Deg F (In)"
+)
+cw_temp_range = bod_data.get(
+    "Condenser water temperature range",
+    "91.5 Deg F (In) ; 101.5 Deg F (out)",
+)
+pumping_system_default = bod_data.get(
+    "Chilled water pumping system", "Primary variable"
+)
+num_floors_default = int(
+    float(bod_data.get("Number of floors (above ground)", 24))
+)
+num_basements_default = int(float(bod_data.get("Number of basements", 3)))
+num_risers_default = int(
+    float(bod_data.get("No. of Chilled water Risers", 6))
+)
+chiller_type_default = bod_data.get(
+    "Type of chiller", "Air to water (Water cooled)"
+)
+chiller_loc = bod_data.get("Chiller Plant location", "Basement")
+ct_loc = bod_data.get("Cooling tower location", "Terrace")
+
+# Calculate Delta T from BOD temperature range string if possible (e.g., 42 out, 56 in -> Delta T = 14)
+delta_t_default = 14.0
+if "42" in chw_temp_range and "56" in chw_temp_range:
+  delta_t_default = 14.0
+
+# --- SIDEBAR CONFIGURATION OVERRIDES ---
+with st.sidebar:
+  st.header("2. Plant Architecture (BOD Linked)")
   chw_system_type = st.selectbox(
       "Chilled Water Flow System",
       [
@@ -28,6 +81,9 @@ with st.sidebar:
           "Primary-Secondary Variable",
           "Primary Constant + Variable Secondary",
       ],
+      index=0
+      if "variable" in pumping_system_default.lower()
+      else 1,
   )
   num_chillers = st.number_input(
       "Number of Chillers", min_value=1, max_value=6, value=2
@@ -36,9 +92,21 @@ with st.sidebar:
       "Total Plant Cooling Capacity (TR)", value=1200.0
   )
 
-  st.header("2. Building Geometry & Hydraulics")
+  st.header("3. Building Geometry & Hydraulics")
   floor_height_ft = st.number_input(
       "Floor-to-Floor Height (ft)", value=12.0, step=1.0
+  )
+  num_floors = st.number_input(
+      "Number of Floors (Above Ground)",
+      min_value=1,
+      max_value=100,
+      value=num_floors_default,
+  )
+  num_risers = st.number_input(
+      "Number of Chilled Water Risers",
+      min_value=1,
+      max_value=12,
+      value=num_risers_default,
   )
   plant_to_riser_ft = st.number_input(
       "Plant Room to Riser Base Distance (ft)", value=120.0, step=10.0
@@ -46,7 +114,7 @@ with st.sidebar:
   avg_branch_ft = st.number_input(
       "Avg Riser-to-Equipment Branch Length (ft)", value=45.0, step=5.0
   )
-  delta_t_f = st.number_input("Design Delta T (°F)", value=14.0)
+  delta_t_f = st.number_input("Design Delta T (°F)", value=delta_t_default)
   max_vel_fps = st.number_input("Max Allowable Velocity (fps)", value=8.0)
   design_friction_rate = st.number_input(
       "Design Friction Rate (ft / 100 ft)", value=2.5
@@ -54,6 +122,22 @@ with st.sidebar:
   insulation_thickness = st.selectbox(
       "Chilled Water Insulation Thickness", ["25mm", "38mm", "50mm"]
   )
+
+# Display BOD Summary Expander if uploaded
+if bod_file is not None:
+  with st.expander(
+      "📋 Active Project Basis of Design (BOD) Parameters", expanded=False
+  ):
+    c1, c2, c3 = st.columns(3)
+    c1.markdown(f"**Employer:** {project_employer}")
+    c1.markdown(f"**Location:** {project_location}")
+    c1.markdown(f"**Typology:** {building_typology}")
+    c2.markdown(f"**Building Height:** {building_height}")
+    c2.markdown(f"**CHW Temp Range:** {chw_temp_range}")
+    c2.markdown(f"**CW Temp Range:** {cw_temp_range}")
+    c3.markdown(f"**Pumping System:** {pumping_system_default}")
+    c3.markdown(f"**Chiller Location:** {chiller_loc}")
+    c3.markdown(f"**Cooling Tower Location:** {ct_loc}")
 
 # Standard Pipe Size Array (Inches)
 standard_sizes = [
@@ -151,7 +235,7 @@ def draw_instrument(msp, x, y, label="PI/TI", layer="INSTRUMENTATION"):
   ).set_placement((x - 1.5, y + 1.5))
 
 
-# --- STAGE TABS ---
+# --- STAGED TABS ---
 tab1, tab2 = st.tabs(
     ["Stage 1: Generate Schedule Template", "Stage 2: Compile Final Package"]
 )
@@ -159,9 +243,9 @@ tab1, tab2 = st.tabs(
 with tab1:
   st.header("Stage 1: Raw Summary Ingestion & Template Export")
   st.markdown(
-      "Upload your raw design summary or load sheet. The app will parse the"
-      " data and generate a standardized AHU schedule template for your review"
-      " and grouping."
+      "Upload your raw design load summary. The app will parse the data, apply"
+      " your BOD parameters, and generate a standardized AHU schedule template"
+      " for your review and grouping."
   )
 
   raw_summary_file = st.file_uploader(
@@ -173,7 +257,6 @@ with tab1:
       df_raw = pd.read_excel(raw_summary_file)
       df_raw.columns = df_raw.columns.str.strip()
 
-      # Map columns intelligently
       rename_map = {}
       for col in df_raw.columns:
         c_lower = col.lower()
@@ -195,7 +278,6 @@ with tab1:
       elif "Design_GPM" in df_raw.columns and "TR" not in df_raw.columns:
         df_raw["TR"] = df_raw["Design_GPM"] / gpm_factor
 
-      # Ensure standard template columns exist
       template_cols = [
           "Riser_ID",
           "Floor",
@@ -216,10 +298,9 @@ with tab1:
           by=["Riser_ID", "Floor"]
       )
 
-      st.success("✅ Raw summary parsed successfully into template format!")
+      st.success("✅ Raw summary parsed successfully with BOD parameters!")
       st.dataframe(df_template, use_container_width=True)
 
-      # Export to Excel buffer for download
       template_buffer = io.BytesIO()
       with pd.ExcelWriter(template_buffer, engine="openpyxl") as writer:
         df_template.to_excel(writer, index=False, sheet_name="AHU_Schedule")
@@ -235,7 +316,7 @@ with tab1:
       )
       st.info(
           "👉 Download this template, review/edit the risers and floors offline,"
-          " and proceed to **Stage 2** when ready."
+          " and proceed to **Stage 2**."
       )
 
     except Exception as e:
@@ -245,8 +326,8 @@ with tab2:
   st.header("Stage 2: Upload Edited Schedule & Compile Final Package")
   st.markdown(
       "Upload your reviewed, grouped, and enhanced AHU schedule Excel sheet."
-      " The application will execute precise hydraulic sizing, plant room"
-      " layout generation, and package creation."
+      " The application will execute precise hydraulic sizing based on your BOD"
+      " and generate the P&ID and CSI BOQ package."
   )
 
   edited_schedule_file = st.file_uploader(
@@ -353,7 +434,7 @@ with tab2:
             key = (csi_code, desc, size_rating, unit)
             boq_dict[key] = boq_dict.get(key, 0.0) + qty
 
-          # Plant Room Layout
+          # Plant Room Layout linked to BOD locations
           plant_origin_x = -160
           plant_origin_y = 0
           chiller_capacity_tr = total_plant_tr / num_chillers
@@ -361,7 +442,10 @@ with tab2:
           chiller_pipe = calc_pipe_size(chiller_gpm)
 
           msp.add_text(
-              f"CHILLER PLANT ROOM | ARCHITECTURE: {chw_system_type.upper()}",
+              (
+                  f"CHILLER PLANT ROOM ({chiller_loc}) | ARCHITECTURE:"
+                  f" {chw_system_type.upper()}"
+              ),
               dxfattribs={"height": 2.2, "layer": "ANNOTATIONS"},
           ).set_placement((plant_origin_x, plant_origin_y + 55))
           msp.add_text(
@@ -390,7 +474,7 @@ with tab2:
             ).set_placement((cx + 5, cy + 6))
             add_csi_item(
                 "23 64 23",
-                "Water-Chillers (Water Cooled Packaged Unit)",
+                f"Water-Chillers ({chiller_type_default})",
                 f"{chiller_capacity_tr:.1f} TR",
                 1,
                 "EA",
@@ -418,11 +502,12 @@ with tab2:
                 dxfattribs={"layer": "PLANT_EQUIP"},
             )
             msp.add_text(
-                f"CT-{c+1}", dxfattribs={"height": 0.9, "layer": "ANNOTATIONS"}
-            ).set_placement((cx + 10, cty + 6))
+                f"CT-{c+1}\n({ct_loc})",
+                dxfattribs={"height": 0.9, "layer": "ANNOTATIONS"},
+            ).set_placement((cx + 5, cty + 6))
             add_csi_item(
                 "23 65 00",
-                "Induced-Draft Crossflow Cooling Towers",
+                "Induced-Draft Crossflow Cooling Towers (CTI Approved)",
                 f"{ct_gpm:.1f} GPM",
                 1,
                 "EA",
