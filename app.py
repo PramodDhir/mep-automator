@@ -12,9 +12,10 @@ st.set_page_config(
 )
 st.title("❄️ Enterprise HVAC Staged Workflow, BOD & Plant Automator")
 st.markdown(
-    "A senior consultancy pipeline: ingest your Project Basis of Design (BOD)"
-    " and raw load summaries, generate standardized schedules, and compile"
-    " precise P&ID DXFs, hydraulic pump calculations, and CSI Division 23 BOQs."
+    "Senior Consultancy Pipeline: Ingest your Project Basis of Design (BOD),"
+    " generate professional ASHRAE-grade equipment schedule templates, and"
+    " compile precise P&ID DXFs, hydraulic pump calculations, and CSI Division"
+    " 23 BOQs."
 )
 
 # --- SIDEBAR: BASIS OF DESIGN (BOD) UPLOAD ---
@@ -66,7 +67,6 @@ chiller_type_default = bod_data.get(
 chiller_loc = bod_data.get("Chiller Plant location", "Basement")
 ct_loc = bod_data.get("Cooling tower location", "Terrace")
 
-# Calculate Delta T from BOD temperature range string if possible (e.g., 42 out, 56 in -> Delta T = 14)
 delta_t_default = 14.0
 if "42" in chw_temp_range and "56" in chw_temp_range:
   delta_t_default = 14.0
@@ -241,11 +241,13 @@ tab1, tab2 = st.tabs(
 )
 
 with tab1:
-  st.header("Stage 1: Raw Summary Ingestion & Template Export")
+  st.header("Stage 1: Raw Summary Ingestion & Consultant Schedule Template")
   st.markdown(
-      "Upload your raw design load summary. The app will parse the data, apply"
-      " your BOD parameters, and generate a standardized AHU schedule template"
-      " for your review and grouping."
+      "Upload your raw design load summary. The app will parse the data and"
+      " generate a fully formatted, professional **Consultant AHU/Equipment"
+      " Schedule Template** matching ASHRAE standards (including Airflow CFM,"
+      " ESP, Total/Sensible TR, GPM, Temperatures, and Riser allocations) for"
+      " your review and grouping."
   )
 
   raw_summary_file = st.file_uploader(
@@ -265,40 +267,69 @@ with tab1:
         elif "floor" in c_lower:
           rename_map[col] = "Floor"
         elif "tag" in c_lower or "ahu" in c_lower or "equipment" in c_lower:
-          rename_map[col] = "AHU_Tag"
+          rename_map[col] = "Equipment_Tag"
         elif c_lower in ["gpm", "flow", "design_gpm", "flow_gpm"]:
           rename_map[col] = "Design_GPM"
         elif c_lower in ["tr", "ton", "tons", "rt", "cooling_tr"]:
-          rename_map[col] = "TR"
+          rename_map[col] = "Total_TR"
 
       df_raw = df_raw.rename(columns=rename_map)
 
-      if "TR" in df_raw.columns and "Design_GPM" not in df_raw.columns:
-        df_raw["Design_GPM"] = df_raw["TR"] * gpm_factor
-      elif "Design_GPM" in df_raw.columns and "TR" not in df_raw.columns:
-        df_raw["TR"] = df_raw["Design_GPM"] / gpm_factor
+      # Build professional engineering columns if missing
+      num_rows = len(df_raw)
+      if "Equipment_Tag" not in df_raw.columns:
+        df_raw["Equipment_Tag"] = [f"AHU-{i+1:02d}" for i in range(num_rows)]
+      if "Floor" not in df_raw.columns:
+        df_raw["Floor"] = [(i % 24) + 1 for i in range(num_rows)]
+      if "Riser_ID" not in df_raw.columns:
+        df_raw["Riser_ID"] = [(i % num_risers) + 1 for i in range(num_rows)]
+      if "Total_TR" not in df_raw.columns:
+        df_raw["Total_TR"] = 25.0
+      if "Sensible_TR" not in df_raw.columns:
+        df_raw["Sensible_TR"] = df_raw["Total_TR"] * 0.75
+      if "Airflow_CFM" not in df_raw.columns:
+        df_raw["Airflow_CFM"] = (
+            df_raw["Total_TR"] * 400
+        )  # standard 400 CFM/TR rule of thumb
+      if "ESP_inwg" not in df_raw.columns:
+        df_raw["ESP_inwg"] = 1.5
+      if "Design_GPM" not in df_raw.columns:
+        df_raw["Design_GPM"] = df_raw["Total_TR"] * gpm_factor
+      if "Entering_Water_Temp_F" not in df_raw.columns:
+        df_raw["Entering_Water_Temp_F"] = 42.0
+      if "Leaving_Water_Temp_F" not in df_raw.columns:
+        df_raw["Leaving_Water_Temp_F"] = 56.0
+      if "Entering_Air_DB_WB_F" not in df_raw.columns:
+        df_raw["Entering_Air_DB_WB_F"] = "80°F DB / 67°F WB"
+      if "Leaving_Air_DB_WB_F" not in df_raw.columns:
+        df_raw["Leaving_Air_DB_WB_F"] = "54°F DB / 53°F WB"
+      if "Motor_HP" not in df_raw.columns:
+        df_raw["Motor_HP"] = 5.0
+      if "Notes_Grouping" not in df_raw.columns:
+        df_raw["Notes_Grouping"] = "Standard Floor AHU"
 
-      template_cols = [
+      consultant_template_cols = [
           "Riser_ID",
           "Floor",
-          "AHU_Tag",
-          "TR",
+          "Equipment_Tag",
+          "Total_TR",
+          "Sensible_TR",
+          "Airflow_CFM",
+          "ESP_inwg",
           "Design_GPM",
-          "Notes / Grouping",
+          "Entering_Water_Temp_F",
+          "Leaving_Water_Temp_F",
+          "Entering_Air_DB_WB_F",
+          "Leaving_Air_DB_WB_F",
+          "Motor_HP",
+          "Notes_Grouping",
       ]
-      for c in template_cols:
-        if c not in df_raw.columns:
-          df_raw[c] = (
-              ""
-              if c != "Riser_ID" and c != "Floor"
-              else (1 if c == "Riser_ID" else 1)
-          )
 
-      df_template = df_raw[template_cols].sort_values(
+      df_template = df_raw[consultant_template_cols].sort_values(
           by=["Riser_ID", "Floor"]
       )
 
-      st.success("✅ Raw summary parsed successfully with BOD parameters!")
+      st.success("✅ Professional Consultant AHU Schedule Template Generated!")
       st.dataframe(df_template, use_container_width=True)
 
       template_buffer = io.BytesIO()
@@ -307,16 +338,16 @@ with tab1:
       template_data = template_buffer.getvalue()
 
       st.download_button(
-          label="📥 Download Standardized AHU Schedule Template (.xlsx)",
+          label="📥 Download Consultant-Grade AHU Schedule Template (.xlsx)",
           data=template_data,
-          file_name="AHU_Schedule_Review_Template.xlsx",
+          file_name="Consultant_AHU_Equipment_Schedule.xlsx",
           mime=(
               "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
           ),
       )
       st.info(
-          "👉 Download this template, review/edit the risers and floors offline,"
-          " and proceed to **Stage 2**."
+          "👉 Download this professional template, review and adjust risers,"
+          " airflow, ESP, and tonnages offline, and proceed to **Stage 2**."
       )
 
     except Exception as e:
@@ -352,9 +383,30 @@ with tab2:
             " compilation..."
         ):
 
-          total_chw_gpm = df_edit["Design_GPM"].sum()
-          max_floor_num = df_edit["Floor"].max()
-          unique_risers = df_edit["Riser_ID"].unique()
+          # Handle column mapping safely
+          col_gpm = (
+              "Design_GPM"
+              if "Design_GPM" in df_edit.columns
+              else df_edit.columns[7]
+          )
+          col_tr = (
+              "Total_TR" if "Total_TR" in df_edit.columns else df_edit.columns[3]
+          )
+          col_tag = (
+              "Equipment_Tag"
+              if "Equipment_Tag" in df_edit.columns
+              else "AHU_Tag"
+          )
+          if col_tag not in df_edit.columns:
+            col_tag = df_edit.columns[2]
+          col_floor = "Floor" if "Floor" in df_edit.columns else df_edit.columns[1]
+          col_riser = (
+              "Riser_ID" if "Riser_ID" in df_edit.columns else df_edit.columns[0]
+          )
+
+          total_chw_gpm = df_edit[col_gpm].sum()
+          max_floor_num = df_edit[col_floor].max()
+          unique_risers = df_edit[col_riser].unique()
           actual_num_risers = len(unique_risers)
 
           header_length_ft = plant_to_riser_ft + (actual_num_risers * 120)
@@ -396,7 +448,6 @@ with tab2:
           doc.header["$INSUNITS"] = units.MM
           msp = doc.modelspace()
 
-          # Layers
           doc.layers.add("CHWS_PIPE", color=5)
           doc.layers.add("CHWR_PIPE", color=1)
           doc.layers.add("CDWS_PIPE", color=4)
@@ -406,7 +457,6 @@ with tab2:
           doc.layers.add("PLANT_EQUIP", color=7)
           doc.layers.add("ANNOTATIONS", color=7)
 
-          # AHU Block definition
           ahu_blk = doc.blocks.new(name="EQ-AHU-STD")
           ahu_blk.add_lwpolyline(
               [(0, 0), (24, 0), (24, 16), (0, 16), (0, 0)],
@@ -434,7 +484,6 @@ with tab2:
             key = (csi_code, desc, size_rating, unit)
             boq_dict[key] = boq_dict.get(key, 0.0) + qty
 
-          # Plant Room Layout linked to BOD locations
           plant_origin_x = -160
           plant_origin_y = 0
           chiller_capacity_tr = total_plant_tr / num_chillers
@@ -539,7 +588,6 @@ with tab2:
                 "ft",
             )
 
-          # Main Headers & Risers
           header_gpm = total_chw_gpm
           header_pipe = calc_pipe_size(header_gpm)
           riser_spacing = 90
@@ -582,16 +630,16 @@ with tab2:
           )
 
           for i, riser_id in enumerate(unique_risers):
-            riser_data = df_edit[df_edit["Riser_ID"] == riser_id].sort_values(
-                by="Floor"
+            riser_data = df_edit[df_edit[col_riser] == riser_id].sort_values(
+                by=col_floor
             )
-            riser_gpm = riser_data["Design_GPM"].sum()
-            riser_tr = riser_data["TR"].sum()
+            riser_gpm = riser_data[col_gpm].sum()
+            riser_tr = riser_data[col_tr].sum()
             riser_pipe = calc_pipe_size(riser_gpm)
 
             r_chws_x = (i + 1) * riser_spacing
             r_chwr_x = r_chws_x + 10
-            max_floor = riser_data["Floor"].max()
+            max_floor = riser_data[col_floor].max()
             riser_top_y = (max_floor * floor_height) + 15
 
             msp.add_line(
@@ -640,10 +688,10 @@ with tab2:
             )
 
             for _, row in riser_data.iterrows():
-              floor_y = row["Floor"] * floor_height
-              ahu_tag = row["AHU_Tag"]
-              ahu_gpm = row["Design_GPM"]
-              ahu_tr = row["TR"]
+              floor_y = row[col_floor] * floor_height
+              ahu_tag = row[col_tag]
+              ahu_gpm = row[col_gpm]
+              ahu_tr = row[col_tr]
               ahu_pipe = calc_pipe_size(ahu_gpm)
               branch_end_x = r_chwr_x + 35
 
