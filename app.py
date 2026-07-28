@@ -8,52 +8,150 @@ import streamlit as st
 
 # --- PAGE SETUP ---
 st.set_page_config(
-    page_title="Enterprise HVAC P&ID & Plant Automation Suite", layout="wide"
+    page_title="Enterprise HVAC P&ID, Hydraulics & Plant Suite", layout="wide"
 )
-st.title("❄️ Enterprise HVAC P&ID, Plant Hydraulics & CSI-Format BOQ Automator")
+st.title(
+    "❄️ Enterprise HVAC P&ID, Plant Hydraulics & CSI-Format BOQ Automator"
+)
 st.markdown(
     "Generate consultant-grade HVAC floor schematics, Chiller Plant Room"
     " layouts, Condenser Water circuits, exact pressure-drop pump sizing, and"
-    " size-disaggregated CSI Division 23 BOQs."
+    " size-disaggregated CSI Division 23 BOQs driven by your Project Basis of"
+    " Design (BOD)."
 )
 
-# --- CONFIGURATION SIDEBAR ---
+# --- SIDEBAR: DUAL FILE UPLOAD WORKFLOW ---
 with st.sidebar:
-  st.header("1. Plant System Architecture")
+  st.header("1. Project Inputs & Specifications")
+  bod_file = st.file_uploader(
+      "Upload Project Basis of Design (BOD) (.xlsx)",
+      type=["xlsx"],
+      help=(
+          "Upload 'System and project Description.xlsx' to auto-configure"
+          " project parameters."
+      ),
+  )
+  load_file = st.file_uploader(
+      "Upload Thermal / Equipment Schedule (.xlsx)",
+      type=["xlsx"],
+      help="Upload your floor-by-floor AHU/FCU load and flow summary.",
+  )
+
+# --- DEFAULT BOD PARSING & FALLBACKS ---
+bod_data = {}
+if bod_file is not None:
+  try:
+    df_bod = pd.read_excel(bod_file, sheet_name="Sheet1")
+    for idx, row in df_bod.dropna(subset=["Item"]).iterrows():
+      item_name = str(row["Item"]).strip()
+      val = str(row["Type / Description"]).strip()
+      bod_data[item_name] = val
+  except Exception as e:
+    st.warning(f"Could not parse BOD file automatically: {e}")
+
+# Extract parameters with professional engineering fallbacks
+project_employer = bod_data.get("Employer", "ITC Hotels")
+project_location = bod_data.get("Location", "Colombo")
+building_typology = bod_data.get("Building typology", "Mixed use")
+building_height = bod_data.get("Building height", "High rise (124 M)")
+chw_temp_range = bod_data.get(
+    "Chilled water temperature range", "42 Deg F (out) ; 56 Deg F (In)"
+)
+cw_temp_range = bod_data.get(
+    "Condenser water temperature range",
+    "91.5 Deg F (In) ; 101.5 Deg F (out)",
+)
+pumping_system_default = bod_data.get(
+    "Chilled water pumping system", "Primary variable"
+)
+num_floors_default = int(
+    float(bod_data.get("Number of floors (above ground)", 24))
+)
+num_basements_default = int(float(bod_data.get("Number of basements", 3)))
+num_risers_default = int(
+    float(bod_data.get("No. of Chilled water Risers", 6))
+)
+chiller_type_default = bod_data.get(
+    "Type of chiller", "Air to water (Water cooled)"
+)
+chiller_loc = bod_data.get("Chiller Plant location", "Basement")
+ct_loc = bod_data.get("Cooling tower location", "Terrace")
+
+# --- SIDEBAR CONFIGURATION & OVERRIDES ---
+with st.sidebar:
+  st.header("2. Plant System Architecture (BOD Linked)")
   chw_system_type = st.selectbox(
       "Chilled Water Flow System",
-      ["Primary-Secondary Variable", "Primary Variable Flow (VPF)"],
+      [
+          "Primary variable",
+          "Primary-Secondary Variable",
+          "Primary Constant + Variable Secondary",
+      ],
+      index=0
+      if "variable" in pumping_system_default.lower()
+      else 1,
   )
 
-  st.header("2. Plant Capacities & Units")
   num_chillers = st.number_input(
-      "Number of Chillers", min_value=1, max_value=4, value=2
+      "Number of Chillers", min_value=1, max_value=6, value=2
   )
   total_plant_tr = st.number_input(
-      "Total Plant Cooling Capacity (TR)", value=500.0
+      "Total Plant Cooling Capacity (TR)", value=1200.0
   )
 
-  st.header("3. Building Layout & Geometry")
+  st.header("3. Building Geometry & Layout")
   floor_height_ft = st.number_input(
       "Floor-to-Floor Height (ft)", value=12.0, step=1.0
   )
+  num_floors = st.number_input(
+      "Number of Floors (Above Ground)",
+      min_value=1,
+      max_value=100,
+      value=num_floors_default,
+  )
+  num_risers = st.number_input(
+      "Number of Chilled Water Risers",
+      min_value=1,
+      max_value=12,
+      value=num_risers_default,
+  )
   plant_to_riser_ft = st.number_input(
-      "Plant Room to Riser Base Distance (ft)", value=100.0, step=10.0
+      "Plant Room to Riser Base Distance (ft)", value=120.0, step=10.0
   )
   avg_branch_ft = st.number_input(
-      "Avg Riser-to-Equipment Branch Length (ft)", value=40.0, step=5.0
+      "Avg Riser-to-Equipment Branch Length (ft)", value=45.0, step=5.0
   )
 
   st.header("4. Hydraulic & Insulation Criteria")
-  delta_t_f = st.number_input("Design Delta T (°F)", value=12.0)
+  delta_t_f = st.number_input(
+      "Design Delta T (°F)", value=14.0
+  )  # 56 - 42 = 14 F based on BOD
   max_vel_fps = st.number_input("Max Allowable Velocity (fps)", value=8.0)
-  default_tr_to_gpm = st.number_input("GPM per TR Factor", value=2.0)
+  default_tr_to_gpm = st.number_input(
+      "GPM per TR Factor", value=24.0 / 14.0
+  )  # 24,000 BTU/hr per TR / (500 * Delta T) -> 24/14 = 1.71 GPM/TR approx, let's keep 2.0 or compute dynamically
   design_friction_rate = st.number_input(
       "Design Friction Rate (ft / 100 ft)", value=2.5
   )
   insulation_thickness = st.selectbox(
       "Chilled Water Insulation Thickness", ["25mm", "38mm", "50mm"]
   )
+
+# --- DISPLAY BOD SUMMARY IN MAIN APP IF UPLOADED ---
+if bod_file is not None:
+  with st.expander(
+      "📋 Project Basis of Design (BOD) Summary", expanded=True
+  ):
+    c1, c2, c3 = st.columns(3)
+    c1.markdown(f"**Employer:** {project_employer}")
+    c1.markdown(f"**Location:** {project_location}")
+    c1.markdown(f"**Typology:** {building_typology}")
+    c2.markdown(f"**Building Height:** {building_height}")
+    c2.markdown(f"**CHW Temp Range:** {chw_temp_range}")
+    c2.markdown(f"**CW Temp Range:** {cw_temp_range}")
+    c3.markdown(f"**Pumping System:** {pumping_system_default}")
+    c3.markdown(f"**Chiller Location:** {chiller_loc}")
+    c3.markdown(f"**Cooling Tower Location:** {ct_loc}")
 
 # Standard Pipe Size Array (Inches)
 standard_sizes = [
@@ -150,15 +248,10 @@ def draw_instrument(msp, x, y, label="PI/TI", layer="INSTRUMENTATION"):
   ).set_placement((x - 1.5, y + 1.5))
 
 
-# --- FILE UPLOAD WORKFLOW ---
-uploaded_file = st.file_uploader(
-    "Upload Building Thermal/Air Load Summary Excel Sheet (.xlsx)",
-    type=["xlsx"],
-)
-
-if uploaded_file:
+# --- LOAD SCHEDULE PROCESSING ---
+if load_file is not None:
   try:
-    df = pd.read_excel(uploaded_file)
+    df = pd.read_excel(load_file)
     df.columns = df.columns.str.strip()
 
     rename_map = {}
@@ -177,10 +270,12 @@ if uploaded_file:
 
     df = df.rename(columns=rename_map)
 
+    # Calculate GPM if missing
+    gpm_factor = 24.0 / delta_t_f  # standard hydronic conversion factor
     if "Design_GPM" not in df.columns and "TR" in df.columns:
-      df["Design_GPM"] = df["TR"] * default_tr_to_gpm
+      df["Design_GPM"] = df["TR"] * gpm_factor
     elif "TR" not in df.columns and "Design_GPM" in df.columns:
-      df["TR"] = df["Design_GPM"] / default_tr_to_gpm
+      df["TR"] = df["Design_GPM"] / gpm_factor
     elif "Design_GPM" not in df.columns and "TR" not in df.columns:
       st.error(
           "❌ Excel sheet must contain either a 'Flow/GPM' column or a"
@@ -191,29 +286,30 @@ if uploaded_file:
     required_cols = ["Riser_ID", "Floor", "AHU_Tag", "Design_GPM", "TR"]
     missing_cols = [c for c in required_cols if c not in df.columns]
     if missing_cols:
-      st.error(f"❌ Missing required columns: {missing_cols}")
+      st.error(f"❌ Missing required columns in schedule: {missing_cols}")
       st.stop()
 
-    st.success("✅ Design Data successfully loaded, mapped, and verified!")
+    st.success("✅ Thermal Equipment Schedule successfully loaded and mapped!")
     st.dataframe(df, use_container_width=True)
 
     if st.button(
-        "Run Hydraulic Calculations & Generate Submittal Package",
+        "Run Enterprise Hydraulic Calculations & Generate Submittal Package",
         type="primary",
     ):
       with st.spinner(
-          "Calculating precise pipe friction, pump heads, layout, and BOQ..."
+          "Executing hydraulic friction modeling, pump head sizing, plant"
+          " layout, and CSI BOQ..."
       ):
 
         # --- PRECISE HYDRAULIC & LENGTH CALCULATIONS ---
         total_chw_gpm = df["Design_GPM"].sum()
         max_floor_num = df["Floor"].max()
         unique_risers = df["Riser_ID"].unique()
-        num_risers = len(unique_risers)
+        actual_num_risers = len(unique_risers)
 
-        header_length_ft = plant_to_riser_ft + (num_risers * 120)
+        header_length_ft = plant_to_riser_ft + (actual_num_risers * 120)
         total_riser_length_ft = (
-            max_floor_num * floor_height_ft * num_risers * 2
+            max_floor_num * floor_height_ft * actual_num_risers * 2
         )
         total_branch_length_ft = len(df) * avg_branch_ft * 2
         grand_total_chw_pipe_ft = (
@@ -225,23 +321,27 @@ if uploaded_file:
             effective_friction_length_ft / 100.0
         ) * design_friction_rate
 
+        # Total Dynamic Head (TDH) for Chilled Water Pumps
         total_chw_pump_tdh_ft = (
             chw_friction_head_ft
-            + 12.0  # Chiller evaporator drop
-            + 12.0  # AHU coil drop
-            + 10.0  # Control valves
-            + 5.0  # Balancing valves
-            + 5.0  # Strainer
+            + 14.0  # Chiller evaporator drop
+            + 12.0  # AHU cooling coil drop
+            + 10.0  # 2-way control valves
+            + 5.0  # Hydronic balancing valves
+            + 5.0  # Y-strainer drop
         )
 
-        ct_lift_ft = max_floor_num * floor_height_ft * 0.45 + 35.0
-        cw_pipe_length_ft = num_chillers * 180.0
+        # Condenser Water Hydraulics
+        ct_lift_ft = (
+            max_floor_num * floor_height_ft * 0.45 + 40.0
+        )  # Basements to Terrace lift
+        cw_pipe_length_ft = num_chillers * 200.0
         cw_friction_head_ft = (cw_pipe_length_ft * 1.5 / 100.0) * 3.0
         total_cw_pump_tdh_ft = (
             ct_lift_ft
             + cw_friction_head_ft
-            + 12.0  # Chiller condenser drop
-            + 8.0  # Cooling tower nozzle head
+            + 14.0  # Chiller condenser drop
+            + 10.0  # Cooling tower nozzle spray head
         )
 
         # --- DXF CREATION ---
@@ -251,14 +351,14 @@ if uploaded_file:
         msp = doc.modelspace()
 
         # Define Layers
-        doc.layers.add("CHWS_PIPE", color=5)
-        doc.layers.add("CHWR_PIPE", color=1)
-        doc.layers.add("CDWS_PIPE", color=4)
-        doc.layers.add("CDWR_PIPE", color=6)
-        doc.layers.add("VALVES", color=3)
-        doc.layers.add("INSTRUMENTATION", color=2)
-        doc.layers.add("PLANT_EQUIP", color=7)
-        doc.layers.add("ANNOTATIONS", color=7)
+        doc.layers.add("CHWS_PIPE", color=5)  # Blue
+        doc.layers.add("CHWR_PIPE", color=1)  # Red
+        doc.layers.add("CDWS_PIPE", color=4)  # Cyan
+        doc.layers.add("CDWR_PIPE", color=6)  # Magenta
+        doc.layers.add("VALVES", color=3)  # Green
+        doc.layers.add("INSTRUMENTATION", color=2)  # Yellow
+        doc.layers.add("PLANT_EQUIP", color=7)  # White
+        doc.layers.add("ANNOTATIONS", color=7)  # White
 
         # --- CREATE PROPORTIONAL SCHEMA BLOCKS ---
         ahu_blk = doc.blocks.new(name="EQ-AHU-STD")
@@ -286,17 +386,20 @@ if uploaded_file:
           key = (csi_code, desc, size_rating, unit)
           boq_dict[key] = boq_dict.get(key, 0.0) + qty
 
-        # --- CHILLER PLANT ROOM DRAWING SECTION (ALIGNED ON LEFT) ---
-        plant_origin_x = -140
+        # --- CHILLER PLANT ROOM DRAWING SECTION ---
+        plant_origin_x = -160
         plant_origin_y = 0
         chiller_capacity_tr = total_plant_tr / num_chillers
-        chiller_gpm = chiller_capacity_tr * default_tr_to_gpm
+        chiller_gpm = chiller_capacity_tr * gpm_factor
         chiller_pipe = calc_pipe_size(chiller_gpm)
 
         msp.add_text(
-            f"CHILLER PLANT ROOM | ARCHITECTURE: {chw_system_type.upper()}",
+            (
+                f"CHILLER PLANT ROOM ({chiller_loc}) | ARCHITECTURE:"
+                f" {chw_system_type.upper()}"
+            ),
             dxfattribs={"height": 2.2, "layer": "ANNOTATIONS"},
-        ).set_placement((plant_origin_x, plant_origin_y + 45))
+        ).set_placement((plant_origin_x, plant_origin_y + 55))
         msp.add_text(
             (
                 f"DESIGN PUMP HEADS -> Primary CHW TDH:"
@@ -304,34 +407,32 @@ if uploaded_file:
                 f" {total_cw_pump_tdh_ft:.1f} ft"
             ),
             dxfattribs={"height": 1.4, "layer": "ANNOTATIONS"},
-        ).set_placement((plant_origin_x, plant_origin_y + 41))
+        ).set_placement((plant_origin_x, plant_origin_y + 50))
 
-        # Draw Chillers, Primary Pumps, Cooling Towers & Condenser Pumps
         ct_gpm = chiller_gpm * 1.25
         ct_pipe = calc_pipe_size(ct_gpm)
 
+        # 1. Add Chillers & Primary Pumps
         for c in range(num_chillers):
           cx = plant_origin_x + (c * 65)
           cy = plant_origin_y + 15
 
-          # Chiller Box
           msp.add_lwpolyline(
               [(cx, cy), (cx + 40, cy), (cx + 40, cy + 20), (cx, cy + 20), (cx, cy)],
               dxfattribs={"layer": "PLANT_EQUIP"},
           )
           msp.add_text(
-              f"CH-{c+1}\n{chiller_capacity_tr}TR",
+              f"CH-{c+1}\n{chiller_capacity_tr:.0f}TR",
               dxfattribs={"height": 0.9, "layer": "ANNOTATIONS"},
           ).set_placement((cx + 5, cy + 6))
           add_csi_item(
               "23 64 23",
-              "Water-Chillers (Centrifugal / Screw Packaged Unit)",
-              f"{chiller_capacity_tr} TR",
+              f"Water-Chillers ({chiller_type_default})",
+              f"{chiller_capacity_tr:.1f} TR",
               1,
               "EA",
           )
 
-          # Primary Chilled Water Pump
           px = cx + 20
           py = cy - 8
           msp.add_circle(
@@ -348,24 +449,24 @@ if uploaded_file:
               "EA",
           )
 
-          # Cooling Tower above
-          cty = plant_origin_y + 60
+          # 2. Cooling Towers & Condenser Pumps on Terrace
+          cty = plant_origin_y + 65
           msp.add_lwpolyline(
               [(cx, cty), (cx + 40, cty), (cx + 40, cty + 20), (cx, cty + 20), (cx, cty)],
               dxfattribs={"layer": "PLANT_EQUIP"},
           )
           msp.add_text(
-              f"CT-{c+1}", dxfattribs={"height": 1.0, "layer": "ANNOTATIONS"},
-          ).set_placement((cx + 10, cty + 7))
+              f"CT-{c+1}\n({ct_loc})",
+              dxfattribs={"height": 0.9, "layer": "ANNOTATIONS"},
+          ).set_placement((cx + 5, cty + 6))
           add_csi_item(
               "23 65 00",
-              "Induced-Draft Crossflow Cooling Towers",
+              "Induced-Draft Crossflow Cooling Towers (CTI Approved)",
               f"{ct_gpm:.1f} GPM",
               1,
               "EA",
           )
 
-          # Condenser Water Pump
           cwp_y = cty - 10
           msp.add_circle(
               (px, cwp_y), radius=3.5, dxfattribs={"layer": "PLANT_EQUIP"}
@@ -381,7 +482,6 @@ if uploaded_file:
               "EA",
           )
 
-          # Connect CW and CHW plant lines
           msp.add_line(
               (px, cy + 20), (px, cty), dxfattribs={"layer": "CDWS_PIPE"}
           )
@@ -389,11 +489,11 @@ if uploaded_file:
               "23 21 13",
               "Condenser Water Piping (Carbon Steel ASTM A53 Gr. B)",
               f'{ct_pipe}" Dia',
-              120,
+              140,
               "ft",
           )
 
-        if "Primary-Secondary" in chw_system_type:
+        if "Secondary" in chw_system_type:
           for sp in range(2):
             spx = plant_origin_x + 140 + (sp * 25)
             spy = plant_origin_y + 15
@@ -419,7 +519,7 @@ if uploaded_file:
         riser_spacing = 90
         floor_height = 25
         header_offset = 15
-        header_length = (num_risers * riser_spacing) + 50
+        header_length = (actual_num_risers * riser_spacing) + 50
 
         msp.add_line(
             (0, 0), (header_length, 0), dxfattribs={"layer": "CHWS_PIPE"}
@@ -496,8 +596,8 @@ if uploaded_file:
               "ft",
           )
 
-          draw_valve(msp, r_chws_x, 5, f"BFV", "VALVES")
-          draw_valve(msp, r_chwr_x, 5, f"BFV", "VALVES")
+          draw_valve(msp, r_chws_x, 5, "BFV", "VALVES")
+          draw_valve(msp, r_chwr_x, 5, "BFV", "VALVES")
           draw_instrument(msp, r_chws_x, riser_top_y - 5, "DPT", "INSTRUMENTATION")
           add_csi_item(
               "23 05 19",
@@ -681,7 +781,7 @@ if st.session_state.get("package_ready", False):
   st.dataframe(st.session_state["boq_df"], use_container_width=True)
 else:
   st.info(
-      "👆 Please configure your building geometry and upload your design load"
-      " sheet in the sidebar to run hydraulic calculations and generate the"
-      " package."
+      "👆 Please upload your Basis of Design (BOD) sheet and your equipment load"
+      " schedule in the sidebar to execute precise hydraulic sizing and"
+      " generate the package."
   )
